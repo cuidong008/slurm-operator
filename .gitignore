@@ -137,3 +137,8 @@ values-*.yaml
 .helm_ls_cache
 docs/build/html
 *debug_bin*
+
+# Docker Compose OpenLDAP（生成的证书与本地数据目录）
+examples/openldap-certs/*.crt
+examples/openldap-certs/*.key
+examples/data/

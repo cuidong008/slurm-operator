@@ -174,7 +174,7 @@ controller:
     # -- (string \| object) The image to use.
     # Ref: https://kubernetes.io/docs/concepts/containers/images/#image-names
     image:
-      repository: ghcr.io/slinkyproject/slurmctld
+      repository: harbor.aix.com:8443/slinkyproject/slurmctld
       tag: 25.11-ubuntu24.04
     # -- Arguments passed to the image.
     # Ref: https://slurm.schedmd.com/slurmctld.html#SECTION_OPTIONS
@@ -191,7 +191,7 @@ controller:
     # -- (string \| object) The image to use.
     # Ref: https://kubernetes.io/docs/concepts/containers/images/#image-names
     image:
-      repository: ghcr.io/slinkyproject/slurmctld
+      repository: harbor.aix.com:8443/slinkyproject/slurmctld
       tag: 25.11-ubuntu24.04
     # -- The container resource limits and requests.
     # Ref: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#resource-requests-and-limits-of-pod-and-container
@@ -204,7 +204,7 @@ controller:
     # -- (string \| object) The image to use.
     # Ref: https://kubernetes.io/docs/concepts/containers/images/#image-names
     image:
-      repository: docker.io/library/alpine
+      repository: harbor.aix.com:8443/slinkyproject/alpine
       tag: latest
     # -- The container resource limits and requests.
     # Ref: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#resource-requests-and-limits-of-pod-and-container
@@ -224,7 +224,7 @@ controller:
     # If set to "-" or "", it disables dynamic storage provisioning.
     # If undefined or set to null, your default storage provisioner is used.
     # Ref: https://kubernetes.io/docs/concepts/storage/storage-classes/
-    storageClassName: null
+    storageClassName: csi-beegfs-dyn-sc-root
     # Create the `PersistentVolumeClaim` with the desired access modes.
     # Ref: https://kubernetes.io/docs/concepts/storage/persistent-volumes#access-modes
     accessModes:
@@ -329,7 +329,7 @@ restapi:
     # -- (string \| object) The image to use.
     # Ref: https://kubernetes.io/docs/concepts/containers/images/#image-names
     image:
-      repository: ghcr.io/slinkyproject/slurmrestd
+      repository: harbor.aix.com:8443/slinkyproject/slurmrestd
       tag: 25.11-ubuntu24.04
     # -- Environment passed to the image.
     # Ref: https://slurm.schedmd.com/slurmrestd.html#SECTION_ENVIRONMENT-VARIABLES
@@ -411,7 +411,7 @@ accounting:
     # -- (string \| object) The image to use.
     # Ref: https://kubernetes.io/docs/concepts/containers/images/#image-names
     image:
-      repository: ghcr.io/slinkyproject/slurmdbd
+      repository: harbor.aix.com:8443/slinkyproject/slurmdbd
       tag: 25.11-ubuntu24.04
     # -- Arguments passed to the image.
     # Ref: https://slurm.schedmd.com/slurmdbd.html#SECTION_OPTIONS
@@ -524,21 +524,44 @@ sssd:
     filter_users = root,slurm
 
     [pam]
+    # 容器内无 FIDO 设备时，SSSD 2.9+ 仍可能走 passkey 分支并报 ENOENT，导致与密码登录冲突
+    pam_passkey_auth = false
 
     [domain/DEFAULT]
     auth_provider = ldap
     id_provider = ldap
-    ldap_uri = ldap://ldap.example.com
-    ldap_search_base = dc=example,dc=com
-    ldap_user_search_base = ou=Users,dc=example,dc=com
-    ldap_group_search_base = ou=Groups,dc=example,dc=com
+    # id_provider=ldap 时 SSSD 默认会拉 sudo 规则，易与 SSH 认证争抢连接；Login 节点一般不需要 LDAP sudo
+    sudo_provider = none
+    # 宿主机 172.16.84.71 上 Docker Compose OpenLDAP 映射 636（LDAPS）与 389。
+    # 使用 ldaps:// 可避免部分环境下 StartTLS（389）与 GnuTLS 的兼容问题；须保证 slapd 已加载证书（见 hack/apply-openldap-slapd-tls.sh、openldap-certs README）。
+    ldap_uri = ldaps://172.16.84.71:636
+    ldap_referrals = false
+    ldap_search_base = dc=example,dc=org
+    ldap_user_search_base = ou=users,dc=example,dc=org
+    # 若目录中无 ou=groups，过窄的 group base 可能导致异常；用整棵树搜组
+    ldap_group_search_base = dc=example,dc=org
+    ldap_default_bind_dn = cn=admin,dc=example,dc=org
+    ldap_default_authtok_type = password
+    ldap_default_authtok = admin
+    ldap_id_mapping = false
+    ldap_schema = rfc2307bis
+    # ldaps:// 已隐含 TLS，须为 false（勿与 StartTLS 混用）。
+    ldap_id_use_start_tls = false
+    ldap_tls_reqcert = never
+    # ldaps 下部分 GnuTLS + 强制 cipher 串会触发 ldap_install_tls unknown error；若遇此情况可去掉下行或仅保留 NORMAL。
+    ldap_tls_cipher_suite = NORMAL
+    lookup_family_order = ipv4_only
+    # 见 sssd.api.d/sssd-ldap.conf：无 ldap_connection_timeout；勿写未识别项，否则整段域配置校验失败
+    ldap_network_timeout = 30
+    ldap_opt_timeout = 30
+    ldap_connection_expire_timeout = 0
 
 # -- (map[string]object) Slurm LoginSet (sackd, sshd, sssd) configurations.
 loginsets:
   # Sample LoginSet.
   slinky:
     # -- Enable use of this LoginSet.
-    enabled: false
+    enabled: true
     # -- Number of replicas to deploy.
     replicas: 1
     # -- Deployment strategy configuration.
@@ -553,7 +576,7 @@ loginsets:
       # -- (string \| object) The image to use.
       # Ref: https://kubernetes.io/docs/concepts/containers/images/#image-names
       image:
-        repository: ghcr.io/slinkyproject/login
+        repository: harbor.aix.com:8443/slinkyproject/login
         tag: 25.11-ubuntu24.04
       # -- Environment passed to the image.
       env: []
@@ -582,7 +605,7 @@ loginsets:
       # -- (string \| object) The image to use.
       # Ref: https://kubernetes.io/docs/concepts/containers/images/#image-names
       image:
-        repository: docker.io/library/alpine
+        repository: harbor.aix.com:8443/slinkyproject/alpine
         tag: latest
       # -- The container resource limits and requests.
       # Ref: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#resource-requests-and-limits-of-pod-and-container
@@ -669,7 +692,7 @@ nodesets:
       # -- (string \| object) The image to use.
       # Ref: https://kubernetes.io/docs/concepts/containers/images/#image-names
       image:
-        repository: ghcr.io/slinkyproject/slurmd
+        repository: harbor.aix.com:8443/slinkyproject/slurmd
         tag: 25.11-ubuntu24.04
       # -- Arguments passed to the image.
       # Ref: https://slurm.schedmd.com/slurmd.html#SECTION_OPTIONS
@@ -695,7 +718,7 @@ nodesets:
       # -- (string \| object) The image to use.
       # Ref: https://kubernetes.io/docs/concepts/containers/images/#image-names
       image:
-        repository: docker.io/library/alpine
+        repository: harbor.aix.com:8443/slinkyproject/alpine
         tag: latest
       # -- The container resource limits and requests.
       # Ref: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#resource-requests-and-limits-of-pod-and-container

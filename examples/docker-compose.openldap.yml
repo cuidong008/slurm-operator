@@ -1,0 +1,133 @@
+# 与 examples/openldap-bitnami-minimal.yaml 功能对齐：Bitnami OpenLDAP + phpLDAPadmin v2 + TLS。
+#
+# 与 K8s 的差异（等价行为）：
+#   - 数据持久化：同时挂载 **/bitnami/openldap/data** 与 **/bitnami/openldap/slapd.d**（见下方 LDAP_DATA_ROOT）。
+#     若只挂 data，down 再 up 会丢掉容器层里的 slapd.d，只剩 LMDB 数据 → 「Using persisted data」后 slapd 立刻退出。
+#     勿挂整棵 /bitnami/openldap 到单一空目录（易触发 slapadd/LMDB 问题），用 **两个子目录** 分别挂即可。
+#   - 集群内 phpLDAPadmin 连 Service **389→1389**；Compose 内 slapd 直接监听 **389/636**（cap_add: NET_BIND_SERVICE），互访 **openldap:389**。
+#   - 镜像可用环境变量覆盖（与 Harbor 脚本一致）：OPENLDAP_IMAGE、PHPLDAPADMIN_IMAGE。
+#
+# 准备 TLS（与 K8s Secret 同源逻辑，输出到 examples/openldap-certs/）：
+#   ./hack/gen-openldap-compose-certs.sh
+#   生成后宿主机须：sudo chown 1001:1001 examples/openldap-certs/tls.{crt,key} ca.crt && sudo chmod 640 examples/openldap-certs/tls.key
+#   （否则 slapd UID 1001 读不到私钥，cn=config 无 olcTLS，StartTLS 报 unsupported extended operation）
+#
+# 数据根目录 LDAP_DATA_ROOT（默认 ./data，相对本 compose 所在目录 → examples/data/）：
+#   其下需有子目录 ldap/、slapd.d/ 分别挂到 Bitnami 的 data 与在线配置。
+#   openldap-data-init 会 mkdir + chown 1001。
+#   若曾使用旧版只挂 data/ldap 且 down/up 后 slapd 秒退：rm -rf "$LDAP_DATA_ROOT" 后重新 up。
+#   自定义： export LDAP_DATA_ROOT=/data
+#
+# 创建 Slurm/SSSD 用 POSIX 用户 cuidong + 组 group1（示例）：
+#   ./hack/add-openldap-cuidong-user.sh
+#
+# 启动：
+#   docker compose -f examples/docker-compose.openldap.yml up -d
+#   openldap 首次初始化约需数十秒；phpLDAPadmin 在 openldap 容器启动后即起，/up 不依赖 LDAP（与 K8s 示例一致），
+#   若浏览器连目录报错，稍等片刻再刷新。
+#
+# 访问：
+#   phpLDAPadmin：见下方 phpldapadmin ports（示例为宿主机 18080→8080，按你本地映射访问）
+#   LDAP：ldap://127.0.0.1:389、ldaps://127.0.0.1:636；StartTLS 见 Bitnami LDAP_ENABLE_TLS=yes
+#
+# phpLDAPadmin v2 网页登录（默认 LDAP_LOGIN_ATTR=uid，按「用户 ID」而非管理员 DN）：
+#   - 不要用 cn=admin / admin：cn=admin,dc=example,dc=org 是服务端根 DN（LDAP_USERNAME），目录里无此条目，登录框会失败。
+#   - Bitnami 预置：user01 / bitnami1，user02 / bitnami2（posixAccount + uid）。
+#   - 若要用完整 DN 登录：设 LDAP_LOGIN_ATTR=DN，并填 cn=user01,ou=users,dc=example,dc=org + 对应密码。
+#
+name: openldap-lab
+
+services:
+  # 解决 Bind 挂载目录常为 root 属主 → UID 1001 无法写 /bitnami/openldap/data → slapadd 卡死 / 反复重启
+  openldap-data-init:
+    image: docker.io/library/busybox:1.36
+    restart: "no"
+    volumes:
+      - ${LDAP_DATA_ROOT:-./data}:/work
+    command:
+      [
+        "sh",
+        "-c",
+        "mkdir -p /work/ldap /work/slapd.d && chown -R 1001:1001 /work && chmod 755 /work/ldap /work/slapd.d",
+      ]
+
+  openldap:
+    image: ${OPENLDAP_IMAGE:-docker.io/bitnamilegacy/openldap:2.6.10-debian-12-r1}
+    container_name: bitnami-openldap
+    restart: unless-stopped
+    depends_on:
+      openldap-data-init:
+        condition: service_completed_successfully
+    user: "1001"
+    # 非 root 绑定 389/636 需要（与 K8s 里可加 NET_BIND_SERVICE 同理）
+    cap_add:
+      - NET_BIND_SERVICE
+    ports:
+      - "389:389"
+      - "636:636"
+    environment:
+      BITNAMI_DEBUG: "false"
+      LDAP_PORT_NUMBER: "389"
+      LDAP_LDAPS_PORT_NUMBER: "636"
+      LDAP_ROOT: "dc=example,dc=org"
+      LDAP_ADMIN_USERNAME: "admin"
+      LDAP_ADMIN_PASSWORD: "admin"
+      LDAP_REQUIRE_TLS: "no"
+      LDAP_ENABLE_TLS: "yes"
+      LDAP_TLS_CERT_FILE: "/certs/tls.crt"
+      LDAP_TLS_KEY_FILE: "/certs/tls.key"
+      LDAP_TLS_CA_FILE: "/certs/ca.crt"
+    volumes:
+      - ${LDAP_DATA_ROOT:-./data}/ldap:/bitnami/openldap/data
+      - ${LDAP_DATA_ROOT:-./data}/slapd.d:/bitnami/openldap/slapd.d
+      - ${OPENLDAP_TLS_DIR:-./openldap-certs}:/certs:ro
+    # 使用镜像内 ldapsearch（勿用 sh 的 /dev/tcp：Debian 默认 sh 为 dash，与 bash 行为不一致易误判）
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "ldapsearch -x -LLL -H ldap://127.0.0.1:389 -b '' -s base '(objectClass=*)' >/dev/null 2>&1",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 180s
+    cpus: 0.1
+    mem_limit: 512m
+    mem_reservation: 256m
+
+  phpldapadmin:
+    image: ${PHPLDAPADMIN_IMAGE:-docker.io/phpldapadmin/phpldapadmin:2.3.9}
+    container_name: phpldapadmin
+    restart: unless-stopped
+    # 勿用 service_healthy：openldap 首次 slapadd+TLS 较慢，Compose 易在判 healthy 前失败整条栈
+    depends_on:
+      openldap:
+        condition: service_started
+    ports:
+      - "18080:8080"
+    environment:
+      APP_KEY: "base64:3JrewY/3wdVdjKKQxfyh7Zn1gqBzLJfCL3JLfY4n1p4="
+      APP_TIMEZONE: "UTC"
+      LDAP_HOST: "openldap"
+      LDAP_PORT: "389"
+      LDAP_BASE_DN: "dc=example,dc=org"
+      LDAP_NAME: "OpenLDAP (lab)"
+      # 供 PLA 连目录做查询/绑定（根 DN）；不是网页登录框里的用户名
+      LDAP_USERNAME: "cn=admin,dc=example,dc=org"
+      LDAP_PASSWORD: "admin"
+      # 登录框按 uid（见文件头说明；预置 user01/bitnami1）
+      LDAP_LOGIN_ATTR: "uid"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -sf http://127.0.0.1:8080/up >/dev/null || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    cpus: 0.05
+    mem_limit: 512m
+    mem_reservation: 256m

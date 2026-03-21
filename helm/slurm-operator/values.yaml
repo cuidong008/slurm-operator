@@ -37,7 +37,7 @@ operator:
   # -- The image to use, `${repository}:${tag}`.
   # Ref: https://kubernetes.io/docs/concepts/containers/images/#image-names
   image:
-    repository: ghcr.io/slinkyproject/slurm-operator
+    repository: harbor.aix.com:8443/slinkyproject/slurm-operator
     tag: ""
   # Service account configurations.
   serviceAccount:
@@ -103,7 +103,7 @@ webhook:
   # -- The image to use, `${repository}:${tag}`.
   # Ref: https://kubernetes.io/docs/concepts/containers/images/#image-names
   image:
-    repository: ghcr.io/slinkyproject/slurm-operator-webhook
+    repository: harbor.aix.com:8443/slinkyproject/slurm-operator-webhook
     tag: ""
   #
   # Service account configurations.

@@ -275,6 +275,8 @@ kubectl delete customresourcedefinitions.apiextensions.k8s.io tokens.slinky.slur
 
 Project documentation is located in the docs directory of this repository.
 
+- Harbor / air-gapped install notes (Chinese): [installation-harbor](./docs/installation-harbor.md)
+
 [Slinky documentation][slinky-docs] is hosted on the web.
 
 ## Support and Development
