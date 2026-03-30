@@ -1,28 +1,17 @@
-# 最小 Bitnami OpenLDAP + phpLDAPadmin（测试用）。
-# Docker Compose 等价栈（持久化 data、phpLDAPadmin、TLS）：examples/docker-compose.openldap.yml（宿主机 8080 / 389；本清单为 NodePort 30880）
-# OpenLDAP：bitnamilegacy/openldap（经 Harbor）；phpLDAPadmin：官方 v2（phpldapadmin/phpldapadmin，与 OpenLDAP 2.6 目录协议兼容，无旧版 osixia 绑定）。
-# 管理界面经 LDAP 明文 389 连 slapd（与 Bitnami LDAP_REQUIRE_TLS=no 一致；SSSD 仍应对 389 使用 StartTLS）。
+# 最小 Bitnami OpenLDAP（测试用，无 Web 管理界面）。
+# Docker Compose 等价栈（持久化、TLS）：examples/docker-compose.openldap.yml（宿主机 389/636）
 #
 # 部署前：
 #   1. 将镜像同步到 Harbor（集群只拉 Harbor 时必做）：
 #        export HARBOR_USERNAME=... HARBOR_PASSWORD=...
 #        ./hack/push-bitnami-openldap-to-harbor.sh
-#        ./hack/push-phpldapadmin-to-harbor.sh
 #      OpenLDAP：见下方 **image**（Harbor 上的 tag；勿把 Docker Hub 的 digest 填进 harbor 域名，见 Deployment 注释）。
-#      phpLDAPadmin：harbor.aix.com:8443/library/phpldapadmin:2.3.9（可用 HARBOR_REGISTRY / HARBOR_PROJECT 覆盖）。
-#      上游：docker.io/bitnamilegacy/openldap；docker.io/phpldapadmin/phpldapadmin（见 https://github.com/leenooks/phpLDAPadmin/wiki/Docker-Container ）。
+#      上游：docker.io/bitnamilegacy/openldap
 #   2. 【必须先执行】生成 TLS Secret **openldap-bitnami-tls**（无则 openldap 无法挂载 /certs，kubelet 报
 #      FailedMount / secret not found，Pod 长期 ContainerCreating）：
 #        ./hack/gen-openldap-bitnami-tls-secret.sh openldap-test
 #   3. kubectl create namespace openldap-test   # 若尚未创建
 #      kubectl apply -n openldap-test -f examples/openldap-bitnami-minimal.yaml
-#
-# 若 openldap 未就绪，phpLDAPadmin 访问 /login 会因连不上 LDAP 返回 500；就绪探针使用 Laravel /up，不依赖 LDAP。
-#
-# 浏览器访问 phpLDAPadmin v2（任选一节点 IP + NodePort；应用监听容器内 8080，NodePort 映射到 80）：
-#   http://<节点IP>:30880/
-# Web 登录使用目录用户；管理绑定见下方 LDAP_USERNAME / LDAP_PASSWORD（与 LDAP_ADMIN_* 一致）。
-# 生产请用 Secret 注入 APP_KEY（勿长期使用示例中的固定密钥）。
 #
 # 与 Slurm / SSSD 对齐：
 #   ldap_uri = ldap://openldap.openldap-test.svc.cluster.local:389
@@ -38,9 +27,10 @@
 # 并配合 fsGroup / initContainer 权限，或参考 Bitnami OpenLDAP Chart。
 #
 # 容器内 **LDAP_PORT_NUMBER=1389 / LDAP_LDAPS_PORT_NUMBER=1636**（非 root 无需绑定特权端口）；ClusterIP Service
-# 仍将 **389→1389、636→1636**，故客户端仍写 **ldap://openldap...:389**（SSSD / phpLDAPadmin 不变）。
+# 仍将 **389→1389、636→1636**，故客户端仍写 **ldap://openldap...:389**。
+# 允许客户端走明文 389 做绑定调试；SSSD 仍应对 389 使用 StartTLS（LDAP_REQUIRE_TLS=no / LDAP_ENABLE_TLS=yes）。
 #
-# 仅用于实验环境；生产请使用强密码、持久卷与合适的 TLS 策略；勿将 phpLDAPadmin 暴露到公网。
+# 仅用于实验环境；生产请使用强密码、持久卷与合适的 TLS 策略。
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -99,7 +89,7 @@ spec:
               value: "admin"
             - name: LDAP_ADMIN_PASSWORD
               value: "admin"
-            # 允许 phpLDAPadmin / 本机调试走明文 389；SSSD 仍应对 389 使用 StartTLS
+            # 允许本机/调试工具走明文 389；SSSD 仍应对 389 使用 StartTLS
             - name: LDAP_REQUIRE_TLS
               value: "no"
             - name: LDAP_ENABLE_TLS
@@ -144,85 +134,3 @@ spec:
     - name: ldaps
       port: 636
       targetPort: ldaps
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: phpldapadmin
-  labels:
-    app: phpldapadmin
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: phpldapadmin
-  template:
-    metadata:
-      labels:
-        app: phpldapadmin
-    spec:
-      containers:
-        - name: phpldapadmin
-          # 官方 PLA v2；tag 见 https://hub.docker.com/r/phpldapadmin/phpldapadmin/tags
-          image: harbor.aix.com:8443/library/phpldapadmin:2.3.9
-          imagePullPolicy: IfNotPresent
-          ports:
-            # 与上游镜像一致：frankenphp 非 root 监听 8080（见项目 Wiki）
-            - name: http
-              containerPort: 8080
-          env:
-            - name: APP_KEY
-              value: "base64:3JrewY/3wdVdjKKQxfyh7Zn1gqBzLJfCL3JLfY4n1p4="
-            - name: APP_TIMEZONE
-              value: "UTC"
-            # 与 Service 同命名空间时可写短名 openldap；此处写 FQDN 避免偶发解析歧义
-            - name: LDAP_HOST
-              value: "openldap.openldap-test.svc.cluster.local"
-            - name: LDAP_PORT
-              value: "389"
-            - name: LDAP_BASE_DN
-              value: "dc=example,dc=org"
-            - name: LDAP_NAME
-              value: "OpenLDAP (lab)"
-            # 供 phpLDAPadmin 连接 LDAP（根 DN）；网页登录请用预置 uid：user01/bitnami1（非 cn=admin）
-            - name: LDAP_USERNAME
-              value: "cn=admin,dc=example,dc=org"
-            - name: LDAP_PASSWORD
-              value: "admin"
-            - name: LDAP_LOGIN_ATTR
-              value: "uid"
-          # 勿用 / 或 /login：会 302 到登录页并在 LDAP 未就绪时返回 500；Laravel 内置 /up 返回 200
-          readinessProbe:
-            httpGet:
-              path: /up
-              port: http
-            initialDelaySeconds: 15
-            periodSeconds: 10
-          livenessProbe:
-            httpGet:
-              path: /up
-              port: http
-            initialDelaySeconds: 60
-            periodSeconds: 30
-          resources:
-            requests:
-              cpu: 50m
-              memory: 256Mi
-            limits:
-              memory: 512Mi
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: phpldapadmin
-  labels:
-    app: phpldapadmin
-spec:
-  type: NodePort
-  selector:
-    app: phpldapadmin
-  ports:
-    - name: http
-      port: 80
-      targetPort: http
-      nodePort: 30880

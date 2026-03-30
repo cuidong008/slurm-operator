@@ -1,11 +1,11 @@
-# 与 examples/openldap-bitnami-minimal.yaml 功能对齐：Bitnami OpenLDAP + phpLDAPadmin v2 + TLS。
+# 与 examples/openldap-bitnami-minimal.yaml 功能对齐：Bitnami OpenLDAP + TLS（无 Web 管理界面）。
 #
 # 与 K8s 的差异（等价行为）：
 #   - 数据持久化：同时挂载 **/bitnami/openldap/data** 与 **/bitnami/openldap/slapd.d**（见下方 LDAP_DATA_ROOT）。
 #     若只挂 data，down 再 up 会丢掉容器层里的 slapd.d，只剩 LMDB 数据 → 「Using persisted data」后 slapd 立刻退出。
 #     勿挂整棵 /bitnami/openldap 到单一空目录（易触发 slapadd/LMDB 问题），用 **两个子目录** 分别挂即可。
-#   - 集群内 phpLDAPadmin 连 Service **389→1389**；Compose 内 slapd 直接监听 **389/636**（cap_add: NET_BIND_SERVICE），互访 **openldap:389**。
-#   - 镜像可用环境变量覆盖（与 Harbor 脚本一致）：OPENLDAP_IMAGE、PHPLDAPADMIN_IMAGE。
+#   - 集群内 slapd 监听 **1389/1636**，Service **389→1389**；Compose 内 slapd 直接监听 **389/636**（cap_add: NET_BIND_SERVICE）。
+#   - 镜像可用环境变量覆盖（与 Harbor 脚本一致）：OPENLDAP_IMAGE。
 #
 # 准备 TLS（与 K8s Secret 同源逻辑，输出到 examples/openldap-certs/）：
 #   ./hack/gen-openldap-compose-certs.sh
@@ -23,17 +23,11 @@
 #
 # 启动：
 #   docker compose -f examples/docker-compose.openldap.yml up -d
-#   openldap 首次初始化约需数十秒；phpLDAPadmin 在 openldap 容器启动后即起，/up 不依赖 LDAP（与 K8s 示例一致），
-#   若浏览器连目录报错，稍等片刻再刷新。
+#   openldap 首次初始化约需数十秒。
 #
 # 访问：
-#   phpLDAPadmin：见下方 phpldapadmin ports（示例为宿主机 18080→8080，按你本地映射访问）
 #   LDAP：ldap://127.0.0.1:389、ldaps://127.0.0.1:636；StartTLS 见 Bitnami LDAP_ENABLE_TLS=yes
-#
-# phpLDAPadmin v2 网页登录（默认 LDAP_LOGIN_ATTR=uid，按「用户 ID」而非管理员 DN）：
-#   - 不要用 cn=admin / admin：cn=admin,dc=example,dc=org 是服务端根 DN（LDAP_USERNAME），目录里无此条目，登录框会失败。
-#   - Bitnami 预置：user01 / bitnami1，user02 / bitnami2（posixAccount + uid）。
-#   - 若要用完整 DN 登录：设 LDAP_LOGIN_ATTR=DN，并填 cn=user01,ou=users,dc=example,dc=org + 对应密码。
+#   目录管理请用 ldapsearch/ldapmodify 或外部工具连上述地址。
 #
 name: openldap-lab
 
@@ -93,41 +87,5 @@ services:
       retries: 10
       start_period: 180s
     cpus: 0.1
-    mem_limit: 512m
-    mem_reservation: 256m
-
-  phpldapadmin:
-    image: ${PHPLDAPADMIN_IMAGE:-docker.io/phpldapadmin/phpldapadmin:2.3.9}
-    container_name: phpldapadmin
-    restart: unless-stopped
-    # 勿用 service_healthy：openldap 首次 slapadd+TLS 较慢，Compose 易在判 healthy 前失败整条栈
-    depends_on:
-      openldap:
-        condition: service_started
-    ports:
-      - "18080:8080"
-    environment:
-      APP_KEY: "base64:3JrewY/3wdVdjKKQxfyh7Zn1gqBzLJfCL3JLfY4n1p4="
-      APP_TIMEZONE: "UTC"
-      LDAP_HOST: "openldap"
-      LDAP_PORT: "389"
-      LDAP_BASE_DN: "dc=example,dc=org"
-      LDAP_NAME: "OpenLDAP (lab)"
-      # 供 PLA 连目录做查询/绑定（根 DN）；不是网页登录框里的用户名
-      LDAP_USERNAME: "cn=admin,dc=example,dc=org"
-      LDAP_PASSWORD: "admin"
-      # 登录框按 uid（见文件头说明；预置 user01/bitnami1）
-      LDAP_LOGIN_ATTR: "uid"
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "curl -sf http://127.0.0.1:8080/up >/dev/null || exit 1",
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-    cpus: 0.05
     mem_limit: 512m
     mem_reservation: 256m
