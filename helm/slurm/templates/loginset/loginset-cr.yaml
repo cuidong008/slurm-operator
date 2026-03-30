@@ -7,11 +7,23 @@ SPDX-License-Identifier: Apache-2.0
 {{- if $loginset.enabled }}
 {{- $name := printf "%s-%s" (include "slurm.login.name" $) $key }}
 {{- $metadata := merge dict ($loginset.metadata | default dict) (dict "labels" (fromYaml (include "slurm.labels" $))) -}}
-{{- $podSpec := $loginset.podSpec | default dict -}}
+{{- $podSpec := deepCopy ($loginset.podSpec | default dict) -}}
+{{- $login := deepCopy $loginset.login -}}
 {{- $imagePullSecrets := concat list ($podSpec.imagePullSecrets | default list) ($.Values.imagePullSecrets | default list) -}}
 {{- $_ := set $podSpec "imagePullSecrets" $imagePullSecrets -}}
 {{- $priorityClassName := $podSpec.priorityClassName | default (include "slurm.priorityClassName" $) -}}
 {{- $_ := set $podSpec "priorityClassName" $priorityClassName -}}
+{{- $claim := include "slurm.sharedHome.claimName" $ | trim -}}
+{{- if and (default false $.Values.sharedHome.enabled) (ne $claim "") -}}
+{{- $sh := $.Values.sharedHome | default dict -}}
+{{- $mountPath := $sh.mountPath | default "/home" -}}
+{{- $vn := $sh.volumeName | default "shared-home" -}}
+{{- $vols := $podSpec.volumes | default list -}}
+{{- $pvcVol := dict "name" $vn "persistentVolumeClaim" (dict "claimName" $claim) -}}
+{{- $_ := set $podSpec "volumes" (append $vols $pvcVol) -}}
+{{- $mounts := $login.volumeMounts | default list -}}
+{{- $_ := set $login "volumeMounts" (append $mounts (dict "name" $vn "mountPath" $mountPath)) -}}
+{{- end -}}
 {{- $podTemplate := dict "metadata" $metadata "spec" $podSpec }}
 ---
 apiVersion: slinky.slurm.net/v1beta1
@@ -43,8 +55,8 @@ spec:
     {{- toYaml . | nindent 4 }}
   {{- end }}{{- /* with $loginset.strategy */}}
   login:
-    {{- $_ := set $loginset.login "imagePullPolicy" (get $loginset.login "imagePullPolicy" | default $.Values.imagePullPolicy ) -}}
-    {{- include "format-container" $loginset.login | nindent 4 }}
+    {{- $_ := set $login "imagePullPolicy" (get $login "imagePullPolicy" | default $.Values.imagePullPolicy ) -}}
+    {{- include "format-container" $login | nindent 4 }}
   {{- include "format-podTemplate" $podTemplate | nindent 2 }}
   initconf:
     {{- $_ := set $loginset.initconf "imagePullPolicy" (default $.Values.imagePullPolicy $loginset.initconf.imagePullPolicy) -}}

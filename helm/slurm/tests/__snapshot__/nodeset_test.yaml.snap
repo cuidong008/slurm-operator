@@ -22,14 +22,16 @@ manifest should match snapshot:
       partition:
         enabled: false
       replicas: 1
-      scalingMode: StatefulSet
+      scalingMode: DaemonSet
       slurmd:
         args: []
         env: []
         image: ghcr.io/slinkyproject/slurmd:v1.2.3
         imagePullPolicy: IfNotPresent
         resources: {}
-        volumeMounts: []
+        volumeMounts:
+        - mountPath: /home
+          name: shared-home
       taintKubeNodes: false
       template:
         metadata:
@@ -45,10 +47,14 @@ manifest should match snapshot:
           initContainers: []
           nodeSelector:
             kubernetes.io/os: linux
+            slurm-role: compute
           priorityClassName: ""
           resources: {}
           tolerations: []
-          volumes: []
+          volumes:
+          - name: shared-home
+            persistentVolumeClaim:
+              claimName: test-release-slurm-shared-home
       updateStrategy:
         rollingUpdate:
           maxUnavailable: 25%

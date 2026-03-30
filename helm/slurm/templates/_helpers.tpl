@@ -43,6 +43,21 @@ Allow the release namespace to be overridden
 {{- end }}
 
 {{/*
+PVC claim name for shared user home when sharedHome injects volumes into LoginSet/NodeSet.
+Returns empty string when shared home is disabled or not configured to mount.
+*/}}
+{{- define "slurm.sharedHome.claimName" -}}
+{{- $sh := .Values.sharedHome | default dict -}}
+{{- $p := $sh.persistence | default dict -}}
+{{- if not (default false $sh.enabled) -}}
+{{- else if $p.existingClaim -}}
+{{- print $p.existingClaim -}}
+{{- else if and (default true $p.enabled) (default true $p.create) -}}
+{{- printf "%s-shared-home" (include "slurm.fullname" .) -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Common labels
 */}}
 {{- define "slurm.labels" -}}

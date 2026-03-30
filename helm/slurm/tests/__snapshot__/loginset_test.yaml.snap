@@ -25,12 +25,18 @@ manifest should match snapshot:
         resources: {}
         securityContext:
           privileged: false
-        volumeMounts: []
+        volumeMounts:
+        - mountPath: /home
+          name: shared-home
       replicas: 1
+      strategy:
+        type: Recreate
       service:
         metadata: {}
+        nodePort: 30122
+        port: 22
         spec:
-          type: LoadBalancer
+          type: NodePort
       sssdConfRef:
         key: sssd.conf
         name: test-release-slurm-sssd-conf
@@ -46,8 +52,12 @@ manifest should match snapshot:
           imagePullSecrets: null
           initContainers: []
           nodeSelector:
+            kubernetes.io/hostname: master
             kubernetes.io/os: linux
           priorityClassName: ""
           resources: {}
           tolerations: []
-          volumes: []
+          volumes:
+          - name: shared-home
+            persistentVolumeClaim:
+              claimName: test-release-slurm-shared-home

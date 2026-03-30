@@ -1,0 +1,15 @@
+mysql:
+  host: __MYSQL_HOST__
+  port: 3306
+  user: slurm
+  dbname: slurm_acct_db
+  password: "__DB_PASSWORD__"
+  clustername: slurm_slurm
+  databaseencode: latin1
+# v1.6.0 使用 service.port（监听 :port 即全网卡）；勿用 addr（旧版字段，会导致 port=0 随机端口）
+service:
+  port: 8972
+slurm:
+  defaultqos: normal
+modulepath:
+  path: /etc/profile

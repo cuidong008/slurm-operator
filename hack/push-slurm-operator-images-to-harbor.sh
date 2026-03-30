@@ -19,7 +19,7 @@ HARBOR_PASSWORD="${HARBOR_PASSWORD:-Har#aix12345}"
 PULL_RETRIES="${PULL_RETRIES:-5}"
 PUSH_RETRIES="${PUSH_RETRIES:-3}"
 SLINKY_VERSION="${SLINKY_VERSION:-25.11-ubuntu24.04}"
-OPERATOR_VERSION="${OPERATOR_VERSION:-1.1.0-rc1}"
+OPERATOR_VERSION="${OPERATOR_VERSION:-1.1.0-rc1-jwtfix}"
 # Comma-separated image list to append, e.g.
 # EXTRA_SOURCE_IMAGES="quay.io/jetstack/cert-manager-controller:v1.15.0,ghcr.io/foo/bar:latest"
 EXTRA_SOURCE_IMAGES="${EXTRA_SOURCE_IMAGES:-}"

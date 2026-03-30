@@ -10,6 +10,22 @@ ARG TARGETOS
 ARG TARGETARCH
 
 WORKDIR /workspace
+
+# Go modules / checksum DB: honor proxy build-args (BuildKit does not always inject these into RUN).
+# GOPROXY can be overridden (e.g. https://goproxy.cn,direct) when proxy.golang.org is slow or unreachable.
+ARG GOPROXY=https://proxy.golang.org,direct
+ENV GOPROXY=${GOPROXY}
+ARG GOSUMDB=sum.golang.org
+ENV GOSUMDB=${GOSUMDB}
+
+ARG HTTP_PROXY
+ARG HTTPS_PROXY
+ARG NO_PROXY
+ENV HTTP_PROXY=${HTTP_PROXY} HTTPS_PROXY=${HTTPS_PROXY} NO_PROXY=${NO_PROXY}
+
+# Prefer IPv4 when dialing; avoids hangs on broken IPv6 routes to public module proxies.
+ENV GODEBUG=netpreferipv4=1
+
 # Copy the Go Modules manifests
 COPY go.mod go.sum ./
 # cache deps before building and copying source so that we don't need to re-download as much

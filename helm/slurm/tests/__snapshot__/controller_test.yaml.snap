@@ -11,11 +11,15 @@ manifest should match snapshot:
       name: test-release-slurm
       namespace: test-namespace
     spec:
+      accountingRef:
+        name: test-release-slurm
+        namespace: test-namespace
       epilogScriptRefs:
         - name: test-release-slurm-epilog-dcgm
       epilogSlurmctldScriptRefs: null
       extraConf: |
-        PartitionName=all Nodes=ALL Default=YES MaxTime=UNLIMITED State=UP
+        PartitionName=GPU Nodes=gpu Default=NO MaxTime=UNLIMITED State=UP
+        PartitionName=all Nodes=slinky Default=YES MaxTime=UNLIMITED State=UP
       jwtKeyRef:
         key: jwt.key
         name: test-release-slurm-auth-jwt

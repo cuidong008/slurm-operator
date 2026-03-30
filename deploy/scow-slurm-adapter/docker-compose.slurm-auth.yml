@@ -1,0 +1,12 @@
+# 叠加使用：挂载与集群一致的 slurm.key / jwt.key，供 sackd + scontrol 使用（AuthType=auth/slurm）。
+# 生成密钥文件：NS=slurm bash ../../hack/fetch-slurm-auth-keys-for-adapter.sh
+# entrypoint 会把密钥复制到 /run/slurm-adapter/ 并 chown 为 slurm(401)，无需在宿主机上 chown 密钥文件。
+#
+# 启动示例：
+#   docker compose -f docker-compose.yml -f docker-compose.hostnet.yml -f docker-compose.slurm.yml -f docker-compose.slurm-auth.yml up -d --build
+
+services:
+  scow-slurm-adapter:
+    volumes:
+      - ./slurm.key:/etc/slurm/slurm.key:ro
+      - ./jwt.key:/etc/slurm/jwt.key:ro

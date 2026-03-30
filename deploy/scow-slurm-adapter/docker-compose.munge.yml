@@ -1,0 +1,7 @@
+# 可选：集群为 Munge 认证时叠加（auth/slurm + JWT 的集群一般不需要）
+services:
+  scow-slurm-adapter:
+    environment:
+      START_MUNGED: "1"
+    volumes:
+      - ./munge.key:/etc/munge/munge.key:ro

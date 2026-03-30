@@ -26,6 +26,18 @@ SPDX-License-Identifier: Apache-2.0
   {{- $volumes = append $volumes $dcgmVolume }}
   {{- $_ := set $nodeset.podSpec "volumes" $volumes -}}
 {{- end }}
+{{- $claim := include "slurm.sharedHome.claimName" $ | trim -}}
+{{- if and (default false $.Values.sharedHome.enabled) (ne $claim "") -}}
+{{- $sh := $.Values.sharedHome | default dict -}}
+{{- $mountPath := $sh.mountPath | default "/home" -}}
+{{- $vn := $sh.volumeName | default "shared-home" -}}
+{{- $specMap := $nodeset.podSpec | default $podSpec -}}
+{{- $vols := $specMap.volumes | default list -}}
+{{- $pvcVol := dict "name" $vn "persistentVolumeClaim" (dict "claimName" $claim) -}}
+{{- $_ := set $specMap "volumes" (append $vols $pvcVol) -}}
+{{- $vms := $nodeset.slurmd.volumeMounts | default list -}}
+{{- $_ := set $nodeset.slurmd "volumeMounts" (append $vms (dict "name" $vn "mountPath" $mountPath)) -}}
+{{- end -}}
 ---
 apiVersion: slinky.slurm.net/v1beta1
 kind: NodeSet
@@ -72,5 +84,5 @@ spec:
   ordinalPadding: {{ $nodeset.ordinalPadding }}
   taintKubeNodes: {{ $nodeset.taintKubeNodes }}
   workloadDisruptionProtection: {{ $nodeset.workloadDisruptionProtection }}
-{{- end }}{{- /* $nodeset.enabled */}}
+{{ end }}{{- /* $nodeset.enabled */}}
 {{- end }}{{- /* range $nodeset := $.Values.nodesets */}}

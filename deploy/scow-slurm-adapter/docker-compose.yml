@@ -1,0 +1,24 @@
+# scow-slurm-adapter：用 Docker 在本机跑 gRPC（默认方式）。
+# 若此前用 K8s + hostNetwork 部署过，请先删除以免宿主机 8972 冲突：
+#   kubectl delete -f scow-slurm-adapter.k8s.yaml
+#
+# 启动：cp .env.example .env && 编辑 DB_PASSWORD，然后：
+#   docker compose up -d
+#
+# OpenSCOW（同机 Docker）的 adapterUrl 使用 172.17.0.1:8972（或 docker0 网关 IP）。
+
+services:
+  scow-slurm-adapter:
+    image: harbor.aix.com:8443/library/scow-slurm-adapter:1.6.0-glibc
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    volumes:
+      - ./config.yaml.tmpl:/tmpl/config.yaml.tmpl:ro
+      - ./entrypoint.sh:/entrypoint.sh:ro
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    ports:
+      - "8972:8972"
+    restart: unless-stopped

@@ -20,11 +20,11 @@ LDAP_BIND_DN="${LDAP_BIND_DN:-cn=admin,dc=example,dc=org}"
 LDAP_BIND_PASSWORD="${LDAP_BIND_PASSWORD:-admin}"
 BASE_DN="${BASE_DN:-dc=example,dc=org}"
 
-USER_UID="${USER_UID:-cuidong1}"
+USER_UID="${USER_UID:-cuidong5}"
 GROUP_CN="${GROUP_CN:-group1}"
 # 与 Bitnami 预置 user01(1000) 等错开；可按集群规划修改
 GID_NUMBER="${GID_NUMBER:-10051}"
-UID_NUMBER="${UID_NUMBER:-10054}"
+UID_NUMBER="${UID_NUMBER:-10055}"
 LDAP_USER_PASSWORD="${LDAP_USER_PASSWORD:-cuidong}"
 
 LDAP_CONTAINER="${LDAP_CONTAINER:-bitnami-openldap}"

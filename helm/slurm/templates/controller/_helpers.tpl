@@ -34,19 +34,23 @@ Determine controller extraConf
 {{- else if .Values.controller.extraConfMap -}}
   {{- $extraConf = (include "_toList" .Values.controller.extraConfMap) | splitList ";" -}}
 {{- end -}}
-{{- $nodesetList := list "ALL" -}}
+{{- $nodesetList := list -}}
 {{- range $nodesetName, $nodeset := .Values.nodesets -}}
   {{- if $nodeset.enabled }}
     {{- $nodesetList = append $nodesetList $nodesetName }}
   {{- end }}{{- /* if $nodeset.enabled */}}
 {{- end }}{{- /* range $nodeset := .Values.nodesets */}}
-{{- range $partName, $part := .Values.partitions -}}
+{{- range $partName := (keys .Values.partitions | sortAlpha) -}}
+{{- $part := index $.Values.partitions $partName -}}
   {{- $part_nodesets := $part.nodesets | default list | uniq | sortAlpha -}}
   {{- if eq (len $part_nodesets) 0 -}}
-    {{- fail (printf "partition `%s` must contain at least one NodeSet (or ALL)." $partName) }}
+    {{- fail (printf "partition `%s` must contain at least one NodeSet." $partName) }}
   {{- end -}}{{- /* if eq len $part_nodesets 0 */}}
   {{- if $part.enabled }}
     {{- range $part_nodesetName := $part_nodesets -}}
+      {{- if eq $part_nodesetName "ALL" }}
+        {{- fail (printf "partition `%s`: nodesets must list NodeSet keys explicitly (do not use ALL; it becomes Slurm Nodes=ALL and merges every compute node into that partition)." $partName) }}
+      {{- end -}}
       {{- if not (has $part_nodesetName $nodesetList) }}
         {{- fail (printf "partition `%s` is referencing nodeset `%s` that does not exist or is disabled." $partName $part_nodesetName) }}
       {{- end }}{{- /* if not (has $part_nodesetName $nodesetList) */}}
@@ -67,7 +71,7 @@ Determine controller extraConf
     {{- $partLine = append $partLine (join " " $partConfig) -}}
     {{- $extraConf = append $extraConf (join " " $partLine) -}}
   {{- end }}{{- /* if $part.enabled */}}
-{{- end }}{{- /* range $part := .Values.partitions */}}
+{{- end }}{{- /* range partition names (sorted) */}}
 {{- join "\n" $extraConf -}}
 {{- end }}
 

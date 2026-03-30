@@ -1,0 +1,101 @@
+# 在 Kubernetes 内运行 scow-slurm-adapter（与 slurm-controller / slurm-accounting 同 namespace）。
+#
+# 与宿主机 Docker Compose 相比：Pod 使用集群 DNS，slurm.conf 里可用 slurm-controller、slurm-accounting
+# 等 Service 名，一般无需为 slurmdbd 再开 NodePort；Helm accounting.service 可保持 ClusterIP。
+#
+# 前置（namespace 以 slurm、Helm release 名为 slurm 为例；否则请改 Secret 名）：
+#   1) 导出 slurm.conf（集群内用，勿再写 ACCOUNTING_NODE_* / 外网 IP）：
+#        K8S_ADAPTER=1 NS=slurm bash hack/fetch-slurm-conf-for-adapter.sh
+#   2) 创建 ConfigMap：
+#        kubectl -n slurm create configmap scow-slurm-adapter-slurm-conf \
+#          --from-file=slurm.conf=deploy/scow-slurm-adapter/slurm.conf
+#   3) 确认 Secret 存在：kubectl -n slurm get secret slurm-auth-slurm slurm-auth-jwt slurm-accounting-db
+#      （若 release 名不是 slurm，则为 <release>-auth-slurm / <release>-auth-jwt）
+#   4) 构建并推送镜像（需含 entrypoint.sh，见本目录 Dockerfile）后，将下面 image 改为你的仓库 tag。
+#   5) 若 Pod 报 exec ... scow-slurm-adapter-amd64: no such file：节点上缓存了同名旧镜像，已设 imagePullPolicy: Always；
+#      或改 tag（如 :1.6.0-YYYYMMDD）后重新 apply，并 rollout restart。
+#
+# 应用：kubectl apply -f deploy/scow-slurm-adapter/scow-slurm-adapter.k8s.yaml
+#
+# OpenSCOW adapterUrl：
+#   - portal 在集群内：http://scow-slurm-adapter.slurm.svc.cluster.local:8972（可把下面 Service 改回 type: ClusterIP）
+#   - portal 在本机 Docker：须 NodePort（默认 30972），adapterUrl 用「节点 IP:30972」或同机时 docker0 网关 :30972
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: scow-slurm-adapter
+  namespace: slurm
+spec:
+  # 集群外 OpenSCOW 无法访问 ClusterIP；默认 NodePort。与集群内其它 NodePort 冲突时改 nodePort（30000–32767）。
+  type: NodePort
+  selector:
+    app: scow-slurm-adapter
+  ports:
+    - name: grpc
+      port: 8972
+      targetPort: 8972
+      nodePort: 30972
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scow-slurm-adapter
+  namespace: slurm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: scow-slurm-adapter
+  template:
+    metadata:
+      labels:
+        app: scow-slurm-adapter
+    spec:
+      # 无 hostNetwork：依赖集群内 Service 解析 slurm-accounting / slurm-controller。
+      containers:
+        - name: scow-slurm-adapter
+          image: harbor.aix.com:8443/library/scow-slurm-adapter:1.6.0
+          # 勿用 IfNotPresent：节点上若已有同名旧 tag，会跳过拉取，导致缺二进制或旧 ENTRYPOINT（exec ... no such file）。
+          imagePullPolicy: IfNotPresent
+          workingDir: /app
+          ports:
+            - containerPort: 8972
+              name: grpc
+          env:
+            # 与 slurmdbd 使用同一库；密码来自 accounting  chart 生成的 Secret。
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: slurm-accounting-db
+                  key: password
+            # 集群内可访问的 MySQL 主机（你环境可能是集群外 172.x、或集群内 Service 名）。
+            - name: MYSQL_HOST
+              value: "172.16.84.71"
+          volumeMounts:
+            - name: slurm-etc
+              mountPath: /etc/slurm
+              readOnly: true
+      volumes:
+        - name: slurm-etc
+          projected:
+            defaultMode: 0444
+            sources:
+              # Helm 默认 {{ release }}-auth-slurm / jwt，release=slurm 时如下：
+              - secret:
+                  name: slurm-auth-slurm
+                  items:
+                    - key: slurm.key
+                      path: slurm.key
+                      mode: 256
+              - secret:
+                  name: slurm-auth-jwt
+                  items:
+                    - key: jwt.key
+                      path: jwt.key
+                      mode: 256
+              - configMap:
+                  name: scow-slurm-adapter-slurm-conf
+                  items:
+                    - key: slurm.conf
+                      path: slurm.conf

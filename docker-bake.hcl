@@ -11,6 +11,13 @@ variable "VERSION" {
   default = "0.0.0"
 }
 
+# Default single arch so `docker buildx bake` works with the classic **docker** driver.
+# To ship arm64 too, add "linux/arm64" to the list below and use a multi-platform-capable
+# buildx driver (e.g. **docker-container**), not the default **docker** driver.
+variable "PLATFORMS" {
+  default = ["linux/amd64"]
+}
+
 function "format_tag" {
   params = [registry, stage, version]
   result = format("%s:%s", join("/", compact([registry, stage])), join("-", compact([version])))
@@ -35,10 +42,7 @@ target "_common" {
 }
 
 target "_multiarch" {
-  platforms = [
-    "linux/amd64",
-    "linux/arm64"
-  ]
+  platforms = PLATFORMS
 }
 
 ################################################################################

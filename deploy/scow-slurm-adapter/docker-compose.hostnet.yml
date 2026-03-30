@@ -1,0 +1,13 @@
+# 叠加使用：解决 MySQL 仅允许 localhost / 未授权 Docker 网段时出现
+#   Access denied for user 'slurm'@'172.17.0.1'
+#
+# 用法：
+#   1. .env 中设置 MYSQL_HOST=127.0.0.1（MySQL 在本机监听 3306 时）
+#   2. docker compose -f docker-compose.yml -f docker-compose.hostnet.yml up -d
+#
+# adapter 与宿主机共享网络，gRPC 仍在宿主机 8972；OpenSCOW 仍可用 adapterUrl 172.17.0.1:8972
+
+services:
+  scow-slurm-adapter:
+    network_mode: host
+    ports: []

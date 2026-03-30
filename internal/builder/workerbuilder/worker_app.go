@@ -102,6 +102,16 @@ func nodesetVolumes(nodeset *slinkyv1beta1.NodeSet, controller *slinkyv1beta1.Co
 								},
 							},
 						},
+						{
+							Secret: &corev1.SecretProjection{
+								LocalObjectReference: corev1.LocalObjectReference{
+									Name: controller.AuthJwtRef().Name,
+								},
+								Items: []corev1.KeyToPath{
+									{Key: controller.AuthJwtRef().Key, Path: common.JwtKeyFile},
+								},
+							},
+						},
 					},
 				},
 			},
@@ -216,6 +226,8 @@ func (b *WorkerBuilder) slurmdContainer(nodeset *slinkyv1beta1.NodeSet, controll
 					Name:  "POD_MEMORY",
 					Value: strconv.FormatInt(memory, 10),
 				},
+				// Same as slurmrestd: lets the daemon use JWT auth/slurm + auth/jwt when talking to slurmctld (configless fetch).
+				{Name: "SLURM_JWT", Value: "daemon"},
 			},
 			Ports: ports,
 			StartupProbe: &corev1.Probe{
@@ -279,6 +291,8 @@ func (b *WorkerBuilder) slurmdContainer(nodeset *slinkyv1beta1.NodeSet, controll
 func slurmdArgs(nodeset *slinkyv1beta1.NodeSet, controller *slinkyv1beta1.Controller) []string {
 	args := []string{"-Z"}
 	args = append(args, common.ConfiglessArgs(controller)...)
+	// Match slurm.conf AuthInfo before full config is retrieved (configless bootstrap); see slurmd(8) --authinfo.
+	args = append(args, "--authinfo", common.AuthInfo)
 	args = append(args, slurmdConfArgs(nodeset)...)
 	return args
 }

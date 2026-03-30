@@ -142,3 +142,10 @@ docs/build/html
 examples/openldap-certs/*.crt
 examples/openldap-certs/*.key
 examples/data/
+
+# scow-slurm-adapter Docker Compose 本地密码
+deploy/scow-slurm-adapter/.env
+deploy/scow-slurm-adapter/slurm.conf
+deploy/scow-slurm-adapter/munge.key
+deploy/scow-slurm-adapter/slurm.key
+deploy/scow-slurm-adapter/jwt.key

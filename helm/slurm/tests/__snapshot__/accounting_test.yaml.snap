@@ -16,7 +16,10 @@ manifest should match snapshot:
         name: test-release-slurm-auth-jwt
       service:
         metadata: {}
-        spec: {}
+        nodePort: 30819
+        port: 6819
+        spec:
+          type: NodePort
       slurmKeyRef:
         key: slurm.key
         name: test-release-slurm-auth-slurm
@@ -27,12 +30,12 @@ manifest should match snapshot:
         resources: {}
       storageConfig:
         database: slurm_acct_db
-        host: mariadb
+        host: 172.16.84.71
         passwordKeyRef:
           key: password
-          name: mariadb-password
+          name: slurm-accounting-db
         port: 3306
-        username: slurm
+        username: root
       template:
         metadata:
           labels:

@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: slurm-shared-home          # 名称自定，与下方 existingClaim 一致即可
+  namespace: slurm
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: csi-beegfs-dyn-sc-root   # 改为集群实际 SC
+  resources:
+    requests:
+      storage: 100Gi

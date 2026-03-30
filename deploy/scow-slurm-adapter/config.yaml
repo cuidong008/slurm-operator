@@ -1,0 +1,22 @@
+mysql:
+  host: 172.16.84.71
+  port: 3306
+  user: slurm
+  dbname: slurm_acct_db
+  # 推荐改为从 Kubernetes Secret 注入，避免明文
+  password: "<from-secret>"
+  clustername: slurm_slurm
+  databaseencode: latin1
+
+# v1.6.0 为 service.port；见 config.yaml.tmpl
+service:
+  port: 8972
+
+slurm:
+  defaultqos: normal
+  # 若 Slurm 非默认路径，取消注释并填写真实路径
+  # slurmpath: /usr
+
+modulepath:
+  # 若环境未使用 module，可按实际填写可访问路径
+  path: /etc/profile

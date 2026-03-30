@@ -5,6 +5,7 @@ package accountingbuilder
 
 import (
 	"context"
+	"strconv"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -71,7 +72,8 @@ func buildSlurmdbdConf(accounting *slinkyv1beta1.Accounting, storagePass string)
 	conf.AddProperty(config.NewProperty("StoragePort", storagePort))
 	conf.AddProperty(config.NewProperty("StorageUser", storageUser))
 	conf.AddProperty(config.NewProperty("StorageLoc", storageLoc))
-	conf.AddProperty(config.NewProperty("StoragePass", storagePass))
+	// Slurm treats '#' as start of an inline comment; quote so passwords like AbCd#1234 are not truncated.
+	conf.AddProperty(config.NewProperty("StoragePass", strconv.Quote(storagePass)))
 
 	conf.AddProperty(config.NewPropertyRaw("#"))
 	conf.AddProperty(config.NewPropertyRaw("### LOGGING ###"))

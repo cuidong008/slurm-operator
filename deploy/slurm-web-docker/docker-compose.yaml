@@ -1,0 +1,48 @@
+# Slurm-web v6: agent + gateway (see README.md).
+# Requires: secrets/slurmrestd.key — Slurm cluster JWT HS256 key (same material as jwt.key in the cluster).
+
+services:
+  slurm-web-agent:
+    build: .
+    image: slurm-web:6
+    command: ["agent"]
+    environment:
+      SLURM_CLUSTER_NAME: ${SLURM_CLUSTER_NAME:-slurm}
+      # 默认经 host.docker.internal 访问宿主机 6820。port-forward 须: kubectl port-forward ... --address 0.0.0.0
+      SLURMRESTD_URI: ${SLURMRESTD_URI:-http://host.docker.internal:6820}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - slurm-web-data:/var/lib/slurm-web
+      # Read-only mount: copy into the volume in entrypoint so user slurm-web can read the key.
+      - ${SLURMRESTD_KEY_FILE:-./secrets/slurmrestd.key}:/run/slurmrestd.key:ro
+    restart: unless-stopped
+
+  slurm-web-gateway:
+    build: .
+    image: slurm-web:6
+    command: ["gateway"]
+    depends_on:
+      - slurm-web-agent
+    ports:
+      - "${SLURM_WEB_PORT:-5011}:5011"
+    # 连宿主机上的 openldap-lab（examples/docker-compose.openldap.yml 映射 389:389）需要 host 网关
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      AGENT_HOST: slurm-web-agent
+      # 必须与浏览器访问地址一致（含协议、IP/域名、端口），否则 SPA 仍会请求 localhost → CORS 失败
+      SLURM_WEB_PUBLIC_URL: ${SLURM_WEB_PUBLIC_URL:-http://localhost:5011}
+      # 与 examples/docker-compose.openldap.yml（name: openldap-lab）对齐；无 LDAP 时设 SLURM_WEB_LDAP_ENABLED=false
+      SLURM_WEB_LDAP_ENABLED: ${SLURM_WEB_LDAP_ENABLED:-true}
+      SLURM_WEB_LDAP_URI: ${SLURM_WEB_LDAP_URI:-ldap://host.docker.internal:389}
+      SLURM_WEB_LDAP_USER_BASE: ${SLURM_WEB_LDAP_USER_BASE:-ou=users,dc=example,dc=org}
+      SLURM_WEB_LDAP_GROUP_BASE: ${SLURM_WEB_LDAP_GROUP_BASE:-ou=groups,dc=example,dc=org}
+      SLURM_WEB_LDAP_BIND_DN: ${SLURM_WEB_LDAP_BIND_DN:-cn=admin,dc=example,dc=org}
+      SLURM_WEB_LDAP_BIND_PASSWORD: ${SLURM_WEB_LDAP_BIND_PASSWORD:-admin}
+    volumes:
+      - slurm-web-data:/var/lib/slurm-web
+    restart: unless-stopped
+
+volumes:
+  slurm-web-data:

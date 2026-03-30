@@ -38,7 +38,8 @@ operator:
   # Ref: https://kubernetes.io/docs/concepts/containers/images/#image-names
   image:
     repository: harbor.aix.com:8443/slinkyproject/slurm-operator
-    tag: ""
+    # 与 `docker buildx bake` 的 VERSION（及 Harbor 中实际 tag）一致；空字符串则回退为 Chart.Version
+    tag: "1.1.0-rc1-jwtfix2"
   # Service account configurations.
   serviceAccount:
     # -- Allows chart to create the service account.
@@ -104,7 +105,8 @@ webhook:
   # Ref: https://kubernetes.io/docs/concepts/containers/images/#image-names
   image:
     repository: harbor.aix.com:8443/slinkyproject/slurm-operator-webhook
-    tag: ""
+    # 与 operator 镜像使用相同 VERSION，通常与 Chart.Version 或自定义构建 tag 对齐
+    tag: "1.1.0-rc1-jwtfix2"
   #
   # Service account configurations.
   serviceAccount:

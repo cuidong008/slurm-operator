@@ -141,6 +141,7 @@ func (b *ControllerBuilder) controllerPodTemplate(controller *slinkyv1beta1.Cont
 				b.slurmctldContainer(spec.Slurmctld.Container, controller.ClusterName()),
 			},
 			InitContainers: []corev1.Container{
+				b.sackSymlinkInitContainer(spec.Slurmctld),
 				b.reconfigureContainer(spec.Reconfigure),
 				b.CommonBuilder.LogfileContainer(spec.LogFile, common.SlurmctldLogFilePath),
 			},
@@ -290,6 +291,39 @@ func (b *ControllerBuilder) slurmctldContainer(merge corev1.Container, clusterNa
 	return b.CommonBuilder.BuildContainer(opts)
 }
 
+// sackSymlinkInitContainer ensures /run/slurm/sack.socket resolves to slurmctld's socket on the auth
+// emptyDir. Use a real /run/slurm directory plus a symlink to the socket (not /run/slurm -> dir),
+// which matches what `scontrol` expects and avoids odd client path resolution.
+// The target socket may not exist yet when this init runs; a dangling symlink is fine.
+func (b *ControllerBuilder) sackSymlinkInitContainer(ctld slinkyv1beta1.ContainerWrapper) corev1.Container {
+	img := ctld.Image
+	if img == "" {
+		img = "docker.io/library/busybox:1.36"
+	}
+	pullPolicy := ctld.ImagePullPolicy
+	if pullPolicy == "" {
+		pullPolicy = corev1.PullIfNotPresent
+	}
+	return corev1.Container{
+		Name:            "sack-symlink",
+		Image:           img,
+		ImagePullPolicy: pullPolicy,
+		Command: []string{
+			"sh", "-ec",
+			"rm -rf /run/slurm 2>/dev/null; mkdir -p /run/slurm; ln -sfn /run/slurmctld/sack.socket /run/slurm/sack.socket",
+		},
+		VolumeMounts: []corev1.VolumeMount{
+			{Name: common.SlurmPidFileVolume, MountPath: common.SlurmPidFileDir},
+			{Name: common.SlurmAuthSocketVolume, MountPath: common.SlurmctldAuthSocketDir},
+		},
+		// Needs to create a symlink in /run; do not rely on SlurmUser write access to sticky /run.
+		SecurityContext: &corev1.SecurityContext{
+			RunAsUser:    ptr.To[int64](0),
+			RunAsNonRoot: ptr.To(false),
+		},
+	}
+}
+
 //go:embed scripts/reconfigure.sh
 var reconfigureScript string
 
@@ -308,6 +342,8 @@ func (b *ControllerBuilder) reconfigureContainer(container slinkyv1beta1.Contain
 			RestartPolicy: ptr.To(corev1.ContainerRestartPolicyAlways),
 			VolumeMounts: []corev1.VolumeMount{
 				{Name: common.SlurmEtcVolume, MountPath: common.SlurmEtcDir, ReadOnly: true},
+				// Holds /run/slurm symlink -> /run/slurmctld (see sack-symlink init).
+				{Name: common.SlurmPidFileVolume, MountPath: common.SlurmPidFileDir, ReadOnly: true},
 				{Name: common.SlurmAuthSocketVolume, MountPath: common.SlurmctldAuthSocketDir, ReadOnly: true},
 			},
 		},
