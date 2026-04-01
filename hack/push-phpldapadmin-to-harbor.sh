@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Pull phpldapadmin/phpldapadmin (PLA v2) and push to Harbor for examples/openldap-bitnami-minimal.yaml.
+# Pull phpldapadmin/phpldapadmin (PLA v2) and push to Harbor（可选 Web 管理；仓库示例清单不含 PLA，需自写 Deployment）。
 #
 # 用法：
 #   export HARBOR_USERNAME=...

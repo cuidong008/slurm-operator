@@ -4,11 +4,11 @@
 #
 # 用法：
 #   ./hack/gen-openldap-bitnami-tls-secret.sh [namespace] [service_name]
-# 默认：namespace=openldap-test，service_name=openldap
+# 默认：namespace=openldap，service_name=openldap
 # SAN 会包含：<svc>、<svc>.<ns>.svc.cluster.local、<svc>.<ns>.svc、localhost
 set -euo pipefail
 
-NS="${1:-openldap-test}"
+NS="${1:-openldap}"
 SVC="${2:-openldap}"
 
 WORKDIR=$(mktemp -d)

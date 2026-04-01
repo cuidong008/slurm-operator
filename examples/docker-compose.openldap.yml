@@ -1,4 +1,5 @@
-# 与 examples/openldap-bitnami-minimal.yaml 功能对齐：Bitnami OpenLDAP + TLS（无 Web 管理界面）。
+# 与 examples/openldap-bitnami-minimal.yaml 功能对齐：仅 Bitnami OpenLDAP + TLS。
+# 本文件**不含** phpLDAPadmin 等 Web 界面；目录管理请用 ldapsearch/ldapmodify 或自管工具连 389/636。
 #
 # 与 K8s 的差异（等价行为）：
 #   - 数据持久化：同时挂载 **/bitnami/openldap/data** 与 **/bitnami/openldap/slapd.d**（见下方 LDAP_DATA_ROOT）。

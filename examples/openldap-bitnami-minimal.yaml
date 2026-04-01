@@ -9,28 +9,55 @@
 #      上游：docker.io/bitnamilegacy/openldap
 #   2. 【必须先执行】生成 TLS Secret **openldap-bitnami-tls**（无则 openldap 无法挂载 /certs，kubelet 报
 #      FailedMount / secret not found，Pod 长期 ContainerCreating）：
-#        ./hack/gen-openldap-bitnami-tls-secret.sh openldap-test
-#   3. kubectl create namespace openldap-test   # 若尚未创建
-#      kubectl apply -n openldap-test -f examples/openldap-bitnami-minimal.yaml
+#        ./hack/gen-openldap-bitnami-tls-secret.sh openldap
+#   3. kubectl create namespace openldap   # 若尚未创建
+#      kubectl apply -n openldap -f examples/openldap-bitnami-minimal.yaml
 #
 # 与 Slurm / SSSD 对齐：
-#   ldap_uri = ldap://openldap.openldap-test.svc.cluster.local:389
+#   ldap_uri = ldap://openldap.openldap.svc.cluster.local:389
 #   ldap_search_base = dc=example,dc=org
 #   ldap_default_bind_dn = cn=admin,dc=example,dc=org
 #   ldap_default_authtok = <LDAP_ADMIN_PASSWORD>
 #
 # 从旧 osixia 数据迁到 Bitnami 需重新 slapadd / 导入 LDIF，不能复用原 PVC。
 #
-# 勿将 emptyDir/PVC **整卷挂载到 /bitnami/openldap**：会覆盖 Bitnami 期望的卷布局，在部分节点上
-# slapadd 初始化 cn=config（LMDB）会失败（日志仅见 slapadd: could not add entry dn="cn=config"）。
-# 本示例不挂数据卷（目录在容器可写层，Pod 删则数据丢）；生产请用 PVC **仅挂 /bitnami/openldap/data**
-# 并配合 fsGroup / initContainer 权限，或参考 Bitnami OpenLDAP Chart。
+# 持久化（与 examples/docker-compose.openldap.yml 一致）：**两个 PVC** 分别挂
+#   /bitnami/openldap/data、/bitnami/openldap/slapd.d。
+# 勿将 emptyDir/PVC **整卷挂载到 /bitnami/openldap**（单卷盖住整棵树会触发 slapadd/LMDB 初始化失败）。
+# initContainer **openldap-data-init** 对两卷 chown 1001（与 compose 里 busybox 同理）。
+# 若集群无默认 StorageClass，请在下方两个 PVC 上填写 **storageClassName**，否则 PVC 会一直 Pending。
 #
 # 容器内 **LDAP_PORT_NUMBER=1389 / LDAP_LDAPS_PORT_NUMBER=1636**（非 root 无需绑定特权端口）；ClusterIP Service
 # 仍将 **389→1389、636→1636**，故客户端仍写 **ldap://openldap...:389**。
 # 允许客户端走明文 389 做绑定调试；SSSD 仍应对 389 使用 StartTLS（LDAP_REQUIRE_TLS=no / LDAP_ENABLE_TLS=yes）。
 #
-# 仅用于实验环境；生产请使用强密码、持久卷与合适的 TLS 策略。
+# 仅用于实验环境；生产请使用强密码、合适的 TLS 策略与存储容量/StorageClass。
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: openldap-data
+  labels:
+    app: openldap
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: openldap-slapd-d
+  labels:
+    app: openldap
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -50,7 +77,28 @@ spec:
     spec:
       securityContext:
         fsGroup: 1001
+      initContainers:
+        - name: openldap-data-init
+          image: harbor.aix.com:8443/library/busybox:1.36
+          command:
+            - sh
+            - -c
+            - chown -R 1001:1001 /bitnami/openldap/data /bitnami/openldap/slapd.d && chmod 755 /bitnami/openldap/data /bitnami/openldap/slapd.d
+          securityContext:
+            runAsUser: 0
+            runAsNonRoot: false
+          volumeMounts:
+            - name: openldap-data
+              mountPath: /bitnami/openldap/data
+            - name: openldap-slapd-d
+              mountPath: /bitnami/openldap/slapd.d
       volumes:
+        - name: openldap-data
+          persistentVolumeClaim:
+            claimName: openldap-data
+        - name: openldap-slapd-d
+          persistentVolumeClaim:
+            claimName: openldap-slapd-d
         - name: openldap-bitnami-tls
           secret:
             secretName: openldap-bitnami-tls
@@ -67,6 +115,10 @@ spec:
             runAsNonRoot: true
             allowPrivilegeEscalation: false
           volumeMounts:
+            - name: openldap-data
+              mountPath: /bitnami/openldap/data
+            - name: openldap-slapd-d
+              mountPath: /bitnami/openldap/slapd.d
             - name: openldap-bitnami-tls
               mountPath: /certs
               readOnly: true
