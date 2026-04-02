@@ -48,3 +48,16 @@ func (b *CommonBuilder) BuildSecret(opts SecretOpts, owner metav1.Object) (*core
 
 	return out, nil
 }
+
+// SecretKeyBytes returns s.Data[key] when present. Kubernetes API responses populate
+// Secret data in Data, not StringData (StringData is write-oriented); using only
+// StringData for checksums breaks rolling updates when sssd.conf changes.
+func SecretKeyBytes(s *corev1.Secret, key string) []byte {
+	if s == nil || key == "" {
+		return nil
+	}
+	if b, ok := s.Data[key]; ok {
+		return b
+	}
+	return []byte(s.StringData[key])
+}

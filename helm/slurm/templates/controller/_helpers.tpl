@@ -56,11 +56,16 @@ Determine controller extraConf
       {{- end }}{{- /* if not (has $part_nodesetName $nodesetList) */}}
     {{- end }}{{- /* range $part_nodesetName := $part_nodesets */}}
     {{- $partNodes := list -}}
-    {{- range $part_nodesetName := $part_nodesets -}}
-      {{- if has $part_nodesetName $nodesetList -}}
-        {{- $partNodes = append $partNodes $part_nodesetName -}}
-      {{- end -}}{{- /* if has $part_nodesetName $nodesetList */}}
-    {{- end -}}{{- /* range $part_nodesetName := $part_nodesets */}}
+    {{- $explicitNodes := $part.nodes | default list | uniq | sortAlpha -}}
+    {{- if gt (len $explicitNodes) 0 -}}
+      {{- $partNodes = $explicitNodes -}}
+    {{- else -}}
+      {{- range $part_nodesetName := $part_nodesets -}}
+        {{- if has $part_nodesetName $nodesetList -}}
+          {{- $partNodes = append $partNodes $part_nodesetName -}}
+        {{- end -}}{{- /* if has $part_nodesetName $nodesetList */}}
+      {{- end -}}{{- /* range $part_nodesetName := $part_nodesets */}}
+    {{- end -}}
     {{- $partLine := list (printf "PartitionName=%s" $partName) (printf "Nodes=%s" (join "," $partNodes)) -}}
     {{- $partConfig := list -}}
     {{- if $part.config -}}

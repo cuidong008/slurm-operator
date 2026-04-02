@@ -365,8 +365,8 @@ func (b *WorkerBuilder) getWorkerHashes(ctx context.Context, nodeset *slinkyv1be
 	sssdConfRefKey := nodeset.SssdSecretRef().Key
 
 	hashMap := map[string]string{
-		common.AnnotationSshdConfHash: crypto.CheckSum([]byte(sshConfig.Data[loginbuilder.SshdConfigFile])),
-		common.AnnotationSssdConfHash: crypto.CheckSum([]byte(sssdSecret.StringData[sssdConfRefKey])),
+		common.AnnotationSshdConfHash:   crypto.CheckSum([]byte(sshConfig.Data[loginbuilder.SshdConfigFile])),
+		common.AnnotationSssdConfHash: crypto.CheckSum(common.SecretKeyBytes(sssdSecret, sssdConfRefKey)),
 	}
 
 	return hashMap, nil
