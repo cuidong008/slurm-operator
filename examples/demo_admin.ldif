@@ -1,0 +1,20 @@
+# 与 aix 默认 Bitnami OpenLDAP（LDAP_ROOT=dc=example,dc=org）对齐；容器内需 -H ldap://127.0.0.1:1389
+# 登录名 demo_admin，明文密码 admin（仅实验环境）
+
+dn: uid=demo_admin,ou=users,dc=example,dc=org
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: demo_admin
+cn: demo_admin
+sn: demo_admin
+uidNumber: 65001
+gidNumber: 65001
+homeDirectory: /data/home/demo_admin
+loginShell: /bin/bash
+userPassword: {SSHA}EaX0eZYBzVlFPRp+q1X4WSMQuXt05htP
+
+dn: cn=demo_admin,ou=groups,dc=example,dc=org
+objectClass: posixGroup
+gidNumber: 65001
+memberUid: demo_admin

@@ -5,7 +5,7 @@ mysql:
   dbname: slurm_acct_db
   # 推荐改为从 Kubernetes Secret 注入，避免明文
   password: "<from-secret>"
-  clustername: slurm_slurm
+  clustername: slurm
   databaseencode: latin1
 
 # v1.6.0 为 service.port；见 config.yaml.tmpl

@@ -1,6 +1,6 @@
 # 叠加使用：挂载与集群一致的 slurm.conf，使 scontrol 能列出分区（OpenSCOW 仪表盘 getClusterInfo 需要）。
 #
-# 准备 slurm.conf（在 deploy/scow-slurm-adapter 目录）：
+# 准备 slurm.conf（与本文件同目录，即 install/slurm-operator/deploy/scow-slurm-adapter/）：
 #   NS=slurm PATCH_CLUSTERIP=1 bash hack/fetch-slurm-conf-for-adapter.sh
 # PATCH_CLUSTERIP 会把 SlurmctldHost 改成 slurm-controller Service 的 ClusterIP，便于本机 Docker/bridge 或
 # 与 docker-compose.hostnet.yml 联用时能连上 slurmctld（6817）。

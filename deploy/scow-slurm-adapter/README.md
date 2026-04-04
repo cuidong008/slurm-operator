@@ -7,7 +7,7 @@
 若你此前用 K8s 部署过且启用了 `hostNetwork`，或改用 Compose 后，请删掉 K8s 资源，避免与宿主机 **8972** 端口冲突：
 
 ```bash
-kubectl delete -f deploy/scow-slurm-adapter/scow-slurm-adapter.k8s.yaml
+kubectl delete -f install/slurm-operator/deploy/scow-slurm-adapter/scow-slurm-adapter.k8s.yaml
 ```
 
 ## 文件说明
@@ -15,10 +15,10 @@ kubectl delete -f deploy/scow-slurm-adapter/scow-slurm-adapter.k8s.yaml
 | 文件 | 说明 |
 |------|------|
 | `docker-compose.yml` | **默认**：用 Docker 启动 adapter，映射 `8972:8972` |
-| `config.yaml.tmpl` | 配置模板，`DB_PASSWORD` 由 `.env` 在启动时注入 |
+| `config.yaml.tmpl` | 配置模板；`MYSQL_HOST` / `__MYSQL_USER__` / `DB_PASSWORD` 由 entrypoint 从环境注入 |
 | `entrypoint.sh` | 渲染 `config.yaml` 后启动二进制 |
 | `.env.example` | 复制为 `.env` 并填写数据库密码 |
-| `Dockerfile` | 构建 `harbor.aix.com:8443/library/scow-slurm-adapter:1.6.0-glibc`（或本地 tag） |
+| `Dockerfile` | 构建 `harbor.aix.com:8443/library/scow-slurm-adapter:1.6.1-glibc`（或本地 tag） |
 | `config.yaml` | 手写全量配置时的参考（Compose 路径以 tmpl + `.env` 为准） |
 | `scow-slurm-adapter.k8s.yaml` | **可选**：把 adapter 跑在 **与 Slurm 同 namespace** 的 Deployment；可用集群 DNS 连 `slurm-accounting`，通常 **不必** 再给 accounting 开 NodePort |
 | `docker-compose.hostnet.yml` | **可选**：`network_mode: host`，避免 MySQL 拒绝 `slurm@172.17.0.1` |
@@ -30,7 +30,7 @@ kubectl delete -f deploy/scow-slurm-adapter/scow-slurm-adapter.k8s.yaml
 Adapter **已能连上 gRPC** 时，该错误来自 **scow-slurm-adapter** 内部执行 **`scontrol show partition`** 失败或得到空分区（见上游 `services/config/config.go`）。仅 MySQL **不够**，容器内需要：
 
 1. **`slurm-client`（scontrol）** — 已写入本目录 `Dockerfile`，请 **`docker compose build`** 重建镜像。  
-2. **`/etc/slurm/slurm.conf`** — 与集群一致；可用 `bash hack/fetch-slurm-conf-for-adapter.sh` 导出到 **`deploy/scow-slurm-adapter/slurm.conf`**。若其中 **`SlurmctldHost`** 为集群内 DNS，在 Docker 内解析不到时，请改为从本机可达的 **slurmctld 地址**（如 Service ClusterIP、NodePort 所在 IP 等）。  
+2. **`/etc/slurm/slurm.conf`** — 与集群一致；可用 `bash hack/fetch-slurm-conf-for-adapter.sh` 导出到 **本目录 `slurm.conf`**。若其中 **`SlurmctldHost`** 为集群内 DNS，在 Docker 内解析不到时，请改为从本机可达的 **slurmctld 地址**（如 Service ClusterIP、NodePort 所在 IP 等）。  
 3. **`munge.key`** — 与集群 Munge 一致，复制为 **`munge.key`** 与本目录 `docker-compose.slurm.yml` 一并挂载；`entrypoint.sh` 会在启动 adapter 前拉起 **`munged`**。
 
 启动示例（在本目录）：
@@ -68,11 +68,21 @@ docker compose -f docker-compose.yml -f docker-compose.hostnet.yml up -d
 
 ## 已预填参数（`config.yaml.tmpl`）
 
-- MySQL 主机: 默认 **`172.16.84.71`**，可由 **`.env` 的 `MYSQL_HOST`** 覆盖（见上节 `127.0.0.1`）
-- 端口: `3306`，用户: `slurm`，库名: `slurm_acct_db`
-- 密码: 来自 **`.env`** 中的 `DB_PASSWORD`（与 Slurm Accounting / 原 Secret `slurm-accounting-db` 一致即可）
+`mysql:` 段在模板中**全部为占位符**，由 `entrypoint.sh` 用环境变量替换；未设置时使用下列默认（与常见 Slurm Accounting 一致）：
+
+| 占位符 | 环境变量 | 默认 |
+|--------|----------|------|
+| `__MYSQL_HOST__` | `MYSQL_HOST` | `172.16.84.71` |
+| `__MYSQL_PORT__` | `MYSQL_PORT` | `3306` |
+| `__MYSQL_USER__` | `MYSQL_USER` 或 `DB_USER` | `slurm` |
+| `__MYSQL_DBNAME__` | `MYSQL_DBNAME` 或 `MYSQL_DATABASE` | `slurm_acct_db` |
+| `__DB_PASSWORD__` | `DB_PASSWORD` | （必填） |
+| `__MYSQL_CLUSTERNAME__` | `MYSQL_CLUSTERNAME` | `slurm` |
+| `__MYSQL_DATABASE_ENCODE__` | `MYSQL_DATABASE_ENCODE` | `latin1` |
+
+Compose 在 **`.env`** 中设置；K8s 在 Deployment `env` 中设置。**aixx 向导** 会注入主机、用户名、密码 Secret；其余项若与默认一致可省略。
 - gRPC：**v1.6.0** 配置为 `service.port: 8972`（监听 `:8972` 全网卡）；**不要**写 `service.addr`（会导致 `port=0`、实际落在随机端口，`lsof -i:8972` 为空）
-- `clustername: slurm_slurm`（请用 `sacctmgr show cluster -P` 核对）
+- `clustername: slurm`（请用 `sacctmgr show cluster -P` 核对）
 
 ## 部署步骤（Docker Compose）
 
@@ -81,10 +91,10 @@ docker compose -f docker-compose.yml -f docker-compose.hostnet.yml up -d
 将官方二进制放到本目录并构建（与此前流程相同）：
 
 ```bash
-cd deploy/scow-slurm-adapter
+cd install/slurm-operator/deploy/scow-slurm-adapter
 wget https://github.com/PKUHPC/scow-slurm-adapter/releases/download/v1.6.0/scow-slurm-adapter-amd64
 chmod +x scow-slurm-adapter-amd64
-docker build -t harbor.aix.com:8443/library/scow-slurm-adapter:1.6.0-glibc .
+docker build -t harbor.aix.com:8443/library/scow-slurm-adapter:1.6.1-glibc .
 ```
 
 内网需先推 Harbor 时，打 tag 后 `docker push` 即可；`docker-compose.yml` 里 `image` 与构建产物名保持一致。
@@ -110,6 +120,8 @@ nc -zv 127.0.0.1 8972
 
 与 OpenSCOW **同机**且 OpenSCOW 也在 Docker 里时，`config/clusters/slurm.yaml` 中 **`adapterUrl`** 使用 **`172.17.0.1:8972`**（或 `ip -4 addr show docker0` 中的网关地址）。修改后重启 portal-server / `compose up`。
 
+**aixx 管理端**：超算池「Slurm 安装」页有 **「生成 OpenSCOW 配置」**，会按已保存向导生成 OpenSCOW `deploy/docker` 下的 **`config/clusters/slurm.yaml`**、**`config/auth.yml`** 草稿（另需 `install.yaml`、`common.yaml` 等，见 OpenSCOW 该目录 `README.md`）。若 OpenSCOW 跑在集群外，向导里 OpenLDAP 须选 **NodePort**（默认 LDAP **30389**、LDAPS **30636**），保存 Slurm 配置后执行 **「修复 OpenLDAP」** 更新 Service。
+
 ## 可选：Kubernetes 部署（与 Compose 二选一）
 
 Adapter **无状态**（不依赖 PVC；配置来自 Secret/ConfigMap，Pod 重建即可），适合单副本 Deployment。
@@ -119,8 +131,8 @@ Adapter **无状态**（不依赖 PVC；配置来自 Secret/ConfigMap，Pod 重�
 1. **重新构建镜像**（镜像内须含 `entrypoint.sh` / `config.yaml.tmpl`，见本目录 `Dockerfile`）。  
 2. **准备 `slurm.conf`**：`K8S_ADAPTER=1 NS=slurm bash hack/fetch-slurm-conf-for-adapter.sh`（会写 `SlurmctldHost=slurm-controller`；**不要**再设 `ACCOUNTING_NODE_*`）。也可手改已存在的 `slurm.conf` 中该行。  
 3. **创建 ConfigMap**：`kubectl -n slurm create configmap scow-slurm-adapter-slurm-conf --from-file=slurm.conf=./slurm.conf`（路径按你导出文件调整）。  
-4. 编辑 `scow-slurm-adapter.k8s.yaml` 中的 **`MYSQL_HOST`**（以及 **`slurm-auth-*` Secret 名** 若 Helm release 不是 `slurm`）。  
-5. `kubectl apply -f deploy/scow-slurm-adapter/scow-slurm-adapter.k8s.yaml`  
+4. 编辑 `scow-slurm-adapter.k8s.yaml` 中的 **`MYSQL_HOST`**、**`MYSQL_USER`**（以及 **`slurm-auth-*` Secret 名** 若 Helm release 不是 `slurm`）。**推荐**：用 aixx 管理端「安装 SCOW Adapter」向导生成/应用 Deployment，与账务用户名一致。  
+5. `kubectl apply -f install/slurm-operator/deploy/scow-slurm-adapter/scow-slurm-adapter.k8s.yaml`  
 
 验证：`kubectl -n slurm exec deploy/scow-slurm-adapter -- sacctmgr ping`
 
@@ -167,5 +179,5 @@ docker exec -it scow-slurm-adapter-scow-slurm-adapter-1 bash -lc 'sacctmgr ping'
 ## 常见问题
 
 - `ImagePullBackOff`：先 `docker compose build` 或推 Harbor 后再 `up`。
-- `scow-slurm-adapter-amd64` 与基础镜像不兼容：请用本目录基于 `debian:12-slim` 的 `Dockerfile`（glibc）。
+- `scow-slurm-adapter-amd64` 与基础镜像不兼容：请用本目录 `Dockerfile`（`ubuntu:24.04` + 自 Slinky slurmd 镜像复制 `scontrol` / Slurm 插件库，glibc）。
 - 密码含 `|`、`&` 等字符：`sed` 模板可能异常，宜换不含特殊字符的密码或改用挂载已渲染的 `config.yaml`（自行维护文件并改 compose 挂载方式）。

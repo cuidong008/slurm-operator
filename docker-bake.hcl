@@ -18,6 +18,10 @@ variable "PLATFORMS" {
   default = ["linux/amd64"]
 }
 
+variable "GO_BUILDER_IMAGE" {
+  default = "golang:1.26"
+}
+
 function "format_tag" {
   params = [registry, stage, version]
   result = format("%s:%s", join("/", compact([registry, stage])), join("-", compact([version])))
@@ -26,6 +30,11 @@ function "format_tag" {
 ################################################################################
 
 target "_common" {
+  # 与 host 网络 + 本机代理配合：`docker buildx bake --allow network.host`
+  network = "host"
+  args = {
+    GO_BUILDER_IMAGE = GO_BUILDER_IMAGE
+  }
   labels = {
     # Ref: https://github.com/opencontainers/image-spec/blob/v1.0/annotations.md
     "org.opencontainers.image.authors" = "slinky@schedmd.com"

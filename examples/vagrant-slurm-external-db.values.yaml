@@ -1,0 +1,151 @@
+# Vagrant 手工试装：Slurm 在 slurm 命名空间
+# 数据库：172.16.84.71:3306，库 slurm_acct_db1，用户 slurm1，密码 Secret slurmdb/key password
+# LDAP：集群内 openldap.openldap，CA 使用 slurm 命名空间 Secret openldap-ca（key ca.crt）
+# 用法（在 master）：
+#   helm upgrade --install slurm ./helm/slurm -n slurm --create-namespace \
+#     -f examples/vagrant-slurm-external-db.values.yaml
+
+asciiArt: false
+clusterName: slurm
+
+# Vagrant 环境通常不能直连 ghcr，镜像走 Harbor（project 按你集群实际同步修改）
+controller:
+  persistence:
+    storageClassName: bx
+  slurmctld:
+    image:
+      repository: harbor.aix.com:8443/slinkyproject/slurmctld
+      tag: "25.11-ubuntu24.04"
+  reconfigure:
+    image:
+      repository: harbor.aix.com:8443/slinkyproject/slurmctld
+      tag: "25.11-ubuntu24.04"
+  logfile:
+    image:
+      repository: harbor.aix.com:8443/library/busybox
+      tag: "1.36"
+  metrics:
+    enabled: false
+
+restapi:
+  slurmrestd:
+    image:
+      repository: harbor.aix.com:8443/slinkyproject/slurmrestd
+      tag: "25.11-ubuntu24.04"
+
+# 若已有 RWX PVC share 则复用；否则改为 create: true 并去掉 existingClaim
+sharedHome:
+  enabled: true
+  persistence:
+    enabled: true
+    create: false
+    existingClaim: share
+    accessModes:
+      - ReadWriteMany
+
+accounting:
+  enabled: true
+  slurmdbd:
+    image:
+      repository: harbor.aix.com:8443/slinkyproject/slurmdbd
+      tag: "25.11-ubuntu24.04"
+  storageConfig:
+    host: "172.16.84.71"
+    port: 3306
+    database: slurm_acct_db1
+    username: slurm1
+    passwordKeyRef:
+      name: slurmdb
+      key: password
+  service:
+    spec:
+      type: ClusterIP
+
+sssd:
+  conf: |
+    [sssd]
+    config_file_version = 2
+    services = nss,pam
+    domains = DEFAULT
+
+    [nss]
+    filter_groups = root,slurm
+    filter_users = root,slurm
+
+    [pam]
+    pam_passkey_auth = false
+
+    [domain/DEFAULT]
+    auth_provider = ldap
+    id_provider = ldap
+    sudo_provider = none
+    ldap_uri = ldaps://openldap.openldap.svc.cluster.local:636
+    ldap_referrals = false
+    ldap_search_base = dc=example,dc=org
+    ldap_user_search_base = ou=users,dc=example,dc=org
+    ldap_group_search_base = dc=example,dc=org
+    ldap_default_bind_dn = cn=admin,dc=example,dc=org
+    ldap_default_authtok_type = password
+    ldap_default_authtok = admin
+    ldap_id_mapping = false
+    ldap_schema = rfc2307bis
+    ldap_tls_reqcert = demand
+    ldap_tls_cacert = /etc/sssd/certs/ca.crt
+    lookup_family_order = ipv4_only
+    ldap_network_timeout = 30
+    ldap_opt_timeout = 30
+
+nodesets:
+  slinky:
+    enabled: true
+    replicas: 1
+    # 实验环境：避免 PDB maxUnavailable=0 卡住首个 worker 创建
+    workloadDisruptionProtection: false
+    slurmd:
+      image:
+        repository: harbor.aix.com:8443/slinkyproject/slurmd
+        tag: "25.11-ubuntu24.04"
+    logfile:
+      image:
+        repository: harbor.aix.com:8443/library/busybox
+        tag: "1.36"
+    partition:
+      enabled: true
+      configMap:
+        State: UP
+        Default: "YES"
+  gpu:
+    enabled: false
+
+loginsets:
+  slinky:
+    enabled: false
+  gpu:
+    enabled: false
+  login:
+    enabled: true
+    replicas: 1
+    service:
+      spec:
+        type: NodePort
+      nodePort: 30122
+    initconf:
+      image:
+        repository: harbor.aix.com:8443/library/busybox
+        tag: "1.36"
+    login:
+      image:
+        repository: harbor.aix.com:8443/slinkyproject/login
+        tag: "25.11-ubuntu24.04"
+      volumeMounts:
+        - name: openldap-ca
+          mountPath: /etc/sssd/certs
+          readOnly: true
+    podSpec:
+      volumes:
+        - name: openldap-ca
+          secret:
+            secretName: openldap-ca
+            items:
+              - key: ca.crt
+                path: ca.crt

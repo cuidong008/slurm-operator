@@ -8,6 +8,65 @@ if [ -z "${DB_PASSWORD}" ]; then
   exit 1
 fi
 
+# 与 login Pod 一致：挂载 /etc/sssd/sssd.conf（及可选 /etc/sssd/certs）后启动 SSSD，供 getent / su 解析 LDAP 用户。
+# 规则：显式 START_SSSD=0 则永不启动；否则只要存在配置文件即自动启动（不必再设 START_SSSD=1）。
+start_sssd_if_needed() {
+  if [ "${START_SSSD:-}" = "0" ]; then
+    echo "scow-slurm-adapter: START_SSSD=0，跳过 SSSD" >&2
+    return 0
+  fi
+  if [ ! -f /etc/sssd/sssd.conf ]; then
+    if [ "${START_SSSD:-}" = "1" ]; then
+      echo "scow-slurm-adapter: WARN START_SSSD=1 但未挂载 /etc/sssd/sssd.conf，跳过 SSSD" >&2
+    fi
+    return 0
+  fi
+  if ! command -v sssd >/dev/null 2>&1; then
+    echo "scow-slurm-adapter: WARN 未找到 sssd 可执行文件，跳过（请使用基于 login 的镜像）" >&2
+    return 0
+  fi
+  # K8s ConfigMap（subPath）挂载的 sssd.conf 常为 0644 且文件系统只读；SSSD 会因「Permission check on config file」直接退出。
+  # 复制到 /run 并设为 0600，再用 -c 指定；ldap_tls_cacert 等仍指向 /etc/sssd/certs 的绝对路径即可。
+  sssd_cfg=/etc/sssd/sssd.conf
+  if [ -f "$sssd_cfg" ]; then
+    install -d -m 0755 /run/sssd-adapter
+    install -m 0600 /etc/sssd/sssd.conf /run/sssd-adapter/sssd.conf
+    sssd_cfg=/run/sssd-adapter/sssd.conf
+    echo "scow-slurm-adapter: sssd 配置已复制为 ${sssd_cfg} (0600)，避免 ConfigMap 权限导致启动失败" >&2
+  fi
+  install -d -m 0711 /var/lib/sss /var/lib/sss/db /var/lib/sss/pipes /var/lib/sss/mc /var/log/sssd /run/sssd 2>/dev/null || true
+  if command -v dbus-daemon >/dev/null 2>&1 && [ ! -S /var/run/dbus/system_bus_socket ]; then
+    install -d -m 0755 /var/run/dbus
+    dbus-daemon --system --fork 2>/dev/null || true
+  fi
+  echo "scow-slurm-adapter: starting sssd..." >&2
+  # -i：前台模式便于在容器内后台化；日志进文件便于排查
+  /usr/sbin/sssd -c "$sssd_cfg" -i -d 2 >>/var/log/sssd/adapter-sssd.log 2>&1 &
+  sssd_pid=$!
+  i=0
+  while [ "$i" -lt 45 ]; do
+    if [ -S /var/lib/sss/pipes/nss ] 2>/dev/null || [ -S /var/lib/sss/pipes/sudo ] 2>/dev/null; then
+      echo "scow-slurm-adapter: sssd pipe 就绪" >&2
+      break
+    fi
+    if ! kill -0 "$sssd_pid" 2>/dev/null; then
+      echo "scow-slurm-adapter: WARN sssd 进程已退出，见 /var/log/sssd/adapter-sssd.log" >&2
+      break
+    fi
+    i=$((i + 1))
+    sleep 1
+  done
+  if [ -n "${SSSD_SMOKE_USER:-}" ]; then
+    if getent passwd "${SSSD_SMOKE_USER}" >/dev/null 2>&1; then
+      echo "scow-slurm-adapter: getent passwd ${SSSD_SMOKE_USER} OK" >&2
+    else
+      echo "scow-slurm-adapter: WARN getent passwd ${SSSD_SMOKE_USER} 仍失败（LDAP/缓存未就绪或用户名不存在）" >&2
+    fi
+  fi
+}
+
+start_sssd_if_needed
+
 # 仅当显式 START_MUNGED=1 且挂载了集群 munge.key 时启动 munged（auth/munge 集群用 docker-compose.munge.yml）
 if [ "${START_MUNGED:-0}" = "1" ] && [ -r /etc/munge/munge.key ]; then
   chown root:munge /etc/munge/munge.key 2>/dev/null || true
@@ -81,12 +140,23 @@ elif [ "${START_SACKD:-1}" != "0" ] && [ -r /etc/slurm/slurm.conf ] && grep -q '
 fi
 
 MYSQL_HOST=${MYSQL_HOST:-172.16.84.71}
+# 与 aixx 向导一致：K8s Deployment 可注入 MYSQL_USER / DB_USER；Compose 可在 .env 中设置其一；默认 slurm
+MYSQL_USER="${MYSQL_USER:-${DB_USER:-slurm}}"
+MYSQL_PORT="${MYSQL_PORT:-3306}"
+MYSQL_DBNAME="${MYSQL_DBNAME:-${MYSQL_DATABASE:-slurm_acct_db}}"
+MYSQL_CLUSTERNAME="${MYSQL_CLUSTERNAME:-slurm}"
+MYSQL_DATABASE_ENCODE="${MYSQL_DATABASE_ENCODE:-latin1}"
 mkdir -p /app/config
-export MYSQL_HOST DB_PASSWORD
+export MYSQL_HOST DB_PASSWORD MYSQL_USER MYSQL_PORT MYSQL_DBNAME MYSQL_CLUSTERNAME MYSQL_DATABASE_ENCODE
 awk '{
   s = $0
   gsub(/__MYSQL_HOST__/, ENVIRON["MYSQL_HOST"], s)
+  gsub(/__MYSQL_PORT__/, ENVIRON["MYSQL_PORT"], s)
+  gsub(/__MYSQL_USER__/, ENVIRON["MYSQL_USER"], s)
+  gsub(/__MYSQL_DBNAME__/, ENVIRON["MYSQL_DBNAME"], s)
   gsub(/__DB_PASSWORD__/, ENVIRON["DB_PASSWORD"], s)
+  gsub(/__MYSQL_CLUSTERNAME__/, ENVIRON["MYSQL_CLUSTERNAME"], s)
+  gsub(/__MYSQL_DATABASE_ENCODE__/, ENVIRON["MYSQL_DATABASE_ENCODE"], s)
   print s
 }' /tmpl/config.yaml.tmpl > /app/config/config.yaml
 

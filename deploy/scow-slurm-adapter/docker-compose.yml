@@ -9,7 +9,7 @@
 
 services:
   scow-slurm-adapter:
-    image: harbor.aix.com:8443/library/scow-slurm-adapter:1.6.0-glibc
+    image: harbor.aix.com:8443/library/scow-slurm-adapter:1.6.1-glibc
     build:
       context: .
       dockerfile: Dockerfile

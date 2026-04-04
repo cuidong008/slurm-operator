@@ -8,14 +8,14 @@
 #        K8S_ADAPTER=1 NS=slurm bash hack/fetch-slurm-conf-for-adapter.sh
 #   2) 创建 ConfigMap：
 #        kubectl -n slurm create configmap scow-slurm-adapter-slurm-conf \
-#          --from-file=slurm.conf=deploy/scow-slurm-adapter/slurm.conf
+#          --from-file=slurm.conf=install/slurm-operator/deploy/scow-slurm-adapter/slurm.conf
 #   3) 确认 Secret 存在：kubectl -n slurm get secret slurm-auth-slurm slurm-auth-jwt slurm-accounting-db
 #      （若 release 名不是 slurm，则为 <release>-auth-slurm / <release>-auth-jwt）
 #   4) 构建并推送镜像（需含 entrypoint.sh，见本目录 Dockerfile）后，将下面 image 改为你的仓库 tag。
 #   5) 若 Pod 报 exec ... scow-slurm-adapter-amd64: no such file：节点上缓存了同名旧镜像，已设 imagePullPolicy: Always；
-#      或改 tag（如 :1.6.0-YYYYMMDD）后重新 apply，并 rollout restart。
+#      或改 tag（如 :1.6.1-YYYYMMDD）后重新 apply，并 rollout restart。
 #
-# 应用：kubectl apply -f deploy/scow-slurm-adapter/scow-slurm-adapter.k8s.yaml
+# 应用：kubectl apply -f install/slurm-operator/deploy/scow-slurm-adapter/scow-slurm-adapter.k8s.yaml
 #
 # OpenSCOW adapterUrl：
 #   - portal 在集群内：http://scow-slurm-adapter.slurm.svc.cluster.local:8972（可把下面 Service 改回 type: ClusterIP）
@@ -55,7 +55,7 @@ spec:
       # 无 hostNetwork：依赖集群内 Service 解析 slurm-accounting / slurm-controller。
       containers:
         - name: scow-slurm-adapter
-          image: harbor.aix.com:8443/library/scow-slurm-adapter:1.6.0
+          image: harbor.aix.com:8443/library/scow-slurm-adapter:1.6.1
           # 勿用 IfNotPresent：节点上若已有同名旧 tag，会跳过拉取，导致缺二进制或旧 ENTRYPOINT（exec ... no such file）。
           imagePullPolicy: IfNotPresent
           workingDir: /app
@@ -72,6 +72,18 @@ spec:
             # 集群内可访问的 MySQL 主机（你环境可能是集群外 172.x、或集群内 Service 名）。
             - name: MYSQL_HOST
               value: "172.16.84.71"
+            # 与 Accounting 库用户一致；未设置时 entrypoint 默认 slurm。可与 DB_USER 二选一。
+            - name: MYSQL_USER
+              value: "slurm"
+            # 以下可选，与 config.yaml.tmpl 占位符对应；省略时见 entrypoint 内默认值
+            # - name: MYSQL_PORT
+            #   value: "3306"
+            # - name: MYSQL_DBNAME
+            #   value: "slurm_acct_db"
+            # - name: MYSQL_CLUSTERNAME
+            #   value: "slurm"
+            # - name: MYSQL_DATABASE_ENCODE
+            #   value: "latin1"
           volumeMounts:
             - name: slurm-etc
               mountPath: /etc/slurm
