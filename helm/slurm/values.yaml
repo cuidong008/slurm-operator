@@ -173,6 +173,36 @@ sharedHome:
       - ReadWriteMany
     size: 100Gi
 
+# -- Shared software tree on LoginSet and NodeSet (e.g. BeeGFS PVC, RWX).
+# Install admin-managed apps and Lmod modulefiles under `mountPath` (e.g. `/software`).
+sharedSoftware:
+  enabled: false
+  mountPath: /software
+  volumeName: shared-software
+  persistence:
+    enabled: true
+    create: true
+    existingClaim: ""
+    storageClassName: null
+    accessModes:
+      - ReadWriteMany
+    size: 200Gi
+
+# -- Shared project/data directory on LoginSet and NodeSet (e.g. BeeGFS PVC, RWX).
+# Datasets and collaboration files; separate from /home and /software.
+sharedData:
+  enabled: false
+  mountPath: /data
+  volumeName: shared-data
+  persistence:
+    enabled: true
+    create: true
+    existingClaim: ""
+    storageClassName: null
+    accessModes:
+      - ReadWriteMany
+    size: 500Gi
+
 # Slurm controller (slurmctld) configuration.
 controller:
   # -- Configures this component as external (not in Kubernetes).

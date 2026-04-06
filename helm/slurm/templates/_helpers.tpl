@@ -58,6 +58,36 @@ Returns empty string when shared home is disabled or not configured to mount.
 {{- end }}
 
 {{/*
+PVC claim name for shared software tree when sharedSoftware injects volumes into LoginSet/NodeSet.
+Returns empty string when shared software is disabled or not configured to mount.
+*/}}
+{{- define "slurm.sharedSoftware.claimName" -}}
+{{- $ss := .Values.sharedSoftware | default dict -}}
+{{- $p := $ss.persistence | default dict -}}
+{{- if not (default false $ss.enabled) -}}
+{{- else if $p.existingClaim -}}
+{{- print $p.existingClaim -}}
+{{- else if and (default true $p.enabled) (default true $p.create) -}}
+{{- printf "%s-shared-software" (include "slurm.fullname" .) -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+PVC claim name for shared data directory when sharedData injects volumes into LoginSet/NodeSet.
+Returns empty string when shared data is disabled or not configured to mount.
+*/}}
+{{- define "slurm.sharedData.claimName" -}}
+{{- $sd := .Values.sharedData | default dict -}}
+{{- $p := $sd.persistence | default dict -}}
+{{- if not (default false $sd.enabled) -}}
+{{- else if $p.existingClaim -}}
+{{- print $p.existingClaim -}}
+{{- else if and (default true $p.enabled) (default true $p.create) -}}
+{{- printf "%s-shared-data" (include "slurm.fullname" .) -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Common labels
 */}}
 {{- define "slurm.labels" -}}

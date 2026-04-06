@@ -1,0 +1,26 @@
+{{- /*
+SPDX-FileCopyrightText: Copyright (C) SchedMD LLC.
+SPDX-License-Identifier: Apache-2.0
+*/}}
+{{- $ss := .Values.sharedSoftware | default dict -}}
+{{- $p := $ss.persistence | default dict -}}
+{{- if and (default false $ss.enabled) (default true $p.enabled) (default true $p.create) (not $p.existingClaim) }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ printf "%s-shared-software" (include "slurm.fullname" .) }}
+  namespace: {{ include "slurm.namespace" . }}
+  labels:
+    {{- include "slurm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: shared-software
+spec:
+  accessModes:
+    {{- toYaml $p.accessModes | nindent 4 }}
+  {{- if $p.storageClassName }}
+  storageClassName: {{ $p.storageClassName | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ $p.size | quote }}
+{{- end }}

@@ -11,11 +11,13 @@
 - [二点五、不同分区使用不同镜像（策略）](#二点五不同分区使用不同镜像策略)
 - [三、安装 Operator 与 Slurm](#三安装-operator-与-slurm)
 - [三点五、时间同步（强烈建议）](#三点五时间同步强烈建议)
-- [四、Controller 持久化与存储（BeeGFS CSI）](#四controller-持久化与存储beegfs-csi)（**4.2** 含共享家目录与「共享卷上为 LDAP 用户创建家目录」；**4.3** 为 existingClaim。）
+- [四、Controller 持久化与存储（BeeGFS CSI）](#四controller-持久化与存储beegfs-csi)（**4.2** 含共享家目录、**4.2.1** 共享软件卷 `sharedSoftware`、`4.2` 末含「共享卷上为 LDAP 用户创建家目录」；**4.3** 为家目录 existingClaim。）
 - [五、验证集群](#五验证集群)
 - [六、SSSD 与 LDAP 说明](#六sssd-与-ldap-说明)
 - [七、Accounting（账务）](#七accounting账务)
 - [八、常见问题](#八常见问题)
+- [九、镜像工具体检记录（实测）](#九镜像工具体检记录实测)
+- [十、补齐 HPC 工具的 Dockerfile 与使用方法](#十补齐-hpc-工具的-dockerfile-与使用方法)
 
 ---
 
@@ -95,17 +97,17 @@ bash hack/push-slurm-operator-images-to-harbor.sh
 
 ## 二点五、不同分区使用不同镜像（策略）
 
-Slurm 里**分区（partition）**可以把不同节点划给不同队列；在 Slinky Operator 模型里，**计算节点镜像不是按「分区名」单独配置**，而是按 **NodeSet**：每个 NodeSet 的 `nodesets.<名称>.slurmd.image`（`repository` / `tag`）决定该组 `slurmd` Pod 使用的镜像。Helm 顶层 **`partitions`** 只是把 **Slurm 分区**与 **哪些 NodeSet 属于该分区**关联起来，本身不携带镜像字段。
+Slurm 里**分区（partition）**可以把不同节点划给不同队列；在 Slinky Operator 模型里，**计算节点镜像不是按「分区名」单独配置**，而是按 **NodeSet**：每个 NodeSet 的 `nodesets.<名称>.slurmd.image`（`repository` / `tag`）决定该组 `slurmd` Pod 使用的镜像。Helm 顶层 `**partitions`** 只是把 **Slurm 分区**与 **哪些 NodeSet 属于该分区**关联起来，本身不携带镜像字段。
 
 因此，若希望「不同分区对应不同软件栈 / 不同镜像」，推荐策略如下：
 
-1. **为每种环境定义一个 NodeSet**（例如 `cpu`、`gpu`、`legacy`），在每个 NodeSet 下设置各自的 **`slurmd.image`**，指向 Harbor 中已推送的镜像（路径形如 `{HARBOR_REGISTRY}/{HARBOR_PROJECT}/slurmd:...`，与 [第一节](#一同步镜像到-harbor) 一致）。
+1. **为每种环境定义一个 NodeSet**（例如 `cpu`、`gpu`、`legacy`），在每个 NodeSet 下设置各自的 `**slurmd.image`**，指向 Harbor 中已推送的镜像（路径形如 `{HARBOR_REGISTRY}/{HARBOR_PROJECT}/slurmd:...`，与 [第一节](#一同步镜像到-harbor) 一致）。
 2. **在 `partitions` 里为每个 Slurm 分区指定 `nodesets`**，只包含对应的 NodeSet 名称（与 `values.yaml` 里 `nodesets:` 下的键一致）；需要多个 NodeSet 同属一个分区时，在同一分区下列多个名称即可。**不要写 `ALL`**：chart 会生成 Slurm 的 `Nodes=ALL`，容易把所有 NodeSet 都归进该分区；本仓库 chart 已对 `nodesets` 中的字面量 `ALL` **直接报错**，请显式列举（如 `slinky`、`gpu`）。
 3. **同步镜像**：除默认 `slurmd` 外，每增加一种自定义 Worker 镜像，都要能从内网拉取；可用 `hack/push-slurm-operator-images-to-harbor.sh` 的 `EXTRA_SOURCE_IMAGES` 推送额外 tag，或单独 `docker pull/tag/push` 到 Harbor。
-4. **作业侧再选容器（可选）**：若已启用 Pyxis/enroot 等，作业可通过 `--container-image=...` 在计算节点上启动**另一层** OCI 镜像，与节点基础镜像叠加；详见仓库内 [`docs/usage/pyxis.md`](./usage/pyxis.md)。插件与镜像需在各目标 NodeSet 上一致，并用 `--partition` / `--constraint` 等约束作业落点。
+4. **作业侧再选容器（可选）**：若已启用 Pyxis/enroot 等，作业可通过 `--container-image=...` 在计算节点上启动**另一层** OCI 镜像，与节点基础镜像叠加；详见仓库内 `[docs/usage/pyxis.md](./usage/pyxis.md)`。插件与镜像需在各目标 NodeSet 上一致，并用 `--partition` / `--constraint` 等约束作业落点。
 
 **Login 节点是否也要不同镜像？**  
-与 Slurm **分区**直接相关的是 **Worker（NodeSet / `slurmd`）** 镜像。**Login** 由 **`loginsets.<名称>.login.image`** 单独配置，**不会**随分区名自动切换；用户 SSH 到的是某个 LoginSet 暴露的 Service，不是「按 `-p 分区名` 选登录机」。
+与 Slurm **分区**直接相关的是 **Worker（NodeSet / `slurmd`）** 镜像。**Login** 由 `**loginsets.<名称>.login.image`** 单独配置，**不会**随分区名自动切换；用户 SSH 到的是某个 LoginSet 暴露的 Service，不是「按 `-p 分区名` 选登录机」。
 
 - 若只关心**批处理作业**跑在不同 Worker 镜像上：**只配多个 NodeSet + 分区**即可，Login 可以仍用一个镜像（例如通用交互、仅编辑与提交作业）。
 - 若希望**登录环境与某类计算环境一致**（同款编译器/CUDA/模块、`srun`/`sbatch` 预检与 Worker 对齐、或 Login 上也要跑 enroot/pyxis 客户端等）：应为 **多个 LoginSet** 分别设置 `login.image`，与各类 Worker 镜像配套，并通过不同 Service / 入口让用户连到对应登录 Pod；或 **一个** LoginSet + **较全**的 `login` 镜像，再配合共享家目录、Environment Modules 等统一交互体验。
@@ -164,7 +166,7 @@ sudo systemctl disable --now systemd-timesyncd || true
 sudo systemctl enable --now chrony
 ```
 
-2. **立即校时并查看状态**
+1. **立即校时并查看状态**
 
 ```bash
 sudo chronyc -a makestep
@@ -172,19 +174,19 @@ chronyc tracking
 chronyc sources -v
 ```
 
-3. **统一时区（可选，但建议一致）**
+1. **统一时区（可选，但建议一致）**
 
 ```bash
 sudo timedatectl set-timezone Asia/Shanghai
 timedatectl status
 ```
 
-4. **验收标准**
+1. **验收标准**
 
 - 两台机器 `date -u` 时间差尽量小于 1 秒（几秒内通常可接受）。
 - `chronyc tracking` 显示 `Leap status     : Normal`。
 
-5. **若已出现 worker 启动失败，校时后重建 Pod**
+1. **若已出现 worker 启动失败，校时后重建 Pod**
 
 ```bash
 kubectl delete pod -n slurm <失败的worker或login-pod名>
@@ -235,7 +237,7 @@ kubectl describe pvc -n slurm  # 确认 STATUS 为 Bound，STORAGECLASS 为你�
 
 - BeeGFS 为并行文件系统，具体 **accessMode**、是否支持 **ReadWriteMany** 取决于你安装的 BeeGFS CSI 与后端配置；`slurmctld` 为单 Pod 时 **ReadWriteOnce** 通常即可。
 - 若 `storageClassName` 留空（`null`），会使用集群 **默认 StorageClass**；只有默认 SC 指向 BeeGFS 时才会落到 BeeGFS 上，否则建议显式填写 `storageClassName`。
-- **用户家目录**（与 LDAP `homeDirectory` 一致、Login 与计算节点同路径）见下文 **4.2** 及其中 **「共享卷上为 LDAP 用户创建家目录」**；其它数据集目录仍可按需在各 `nodesets.*.podSpec` / `loginsets.`* 上追加卷。
+- **用户家目录**（与 LDAP `homeDirectory` 一致、Login 与计算节点同路径）见下文 **4.2** 及其中 **「共享卷上为 LDAP 用户创建家目录」**；**中心软件树**（Lmod、`/software` 等）见 **4.2.1** `sharedSoftware`。其它数据集仍可按需在各 `nodesets.*.podSpec` / `loginsets.`* 上追加卷。
 
 ### 4.2 用户共享家目录（Login / 计算节点）
 
@@ -261,6 +263,31 @@ sharedHome:
 ```
 
 Helm 会渲染 PVC，名称为 `**<slurm.fullname>-shared-home**`（可用 `helm template` 核对；随 `nameOverride` / `fullnameOverride` 变化），并在 LoginSet / NodeSet 的 Pod 上注入同一 `claimName`。`controller.persistence` 仅用于 **slurmctld 状态**，与 `sharedHome` 无关。
+
+#### 4.2.1 共享软件安装目录（`sharedSoftware`，与 `sharedHome` 并列）
+
+若希望 **运维统一安装的软件** 与用户家目录 **分卷、分配额** 管理，可启用顶层 `sharedSoftware`：在 **所有** 已启用的 LoginSet 与 NodeSet 上再挂一块 PVC（默认挂载路径 `/software`，卷名 `shared-software`）。典型用途：共享编译好的应用、`modulefiles`、只读数据树等。
+
+1. **存储**：与 `sharedHome` 相同，一般为 **ReadWriteMany**（BeeGFS 等）；`storageClassName` 建议与家目录一样显式指向 BeeGFS 动态类（或你的并行文件系统 SC）。
+2. **与镜像配合**：在镜像或站点模块里将 `MODULEPATH` 指到 `sharedSoftware.mountPath` 下（例如 `/software/modulefiles`）；chart **不会**自动写入 `/etc/profile.d`。
+3. **values 示例**（可与 `sharedHome` 同时启用）：
+
+```yaml
+sharedSoftware:
+  enabled: true
+  mountPath: /software
+  volumeName: shared-software
+  persistence:
+    enabled: true
+    create: true
+    # storageClassName: csi-beegfs-dyn-sc-root   # 与家目录可相同或不同，按实际 SC 填写
+    existingClaim: null
+    accessModes:
+      - ReadWriteMany
+    size: 200Gi
+```
+
+Helm 会渲染 PVC，名称为 `**<slurm.fullname>-shared-software**`，并在 Login / Worker 的 Pod 模板中追加对应 `volume` 与 `volumeMount`。若使用 **已有 PVC**，设置 `persistence.create: false` 与 `existingClaim: <PVC 名称>`，做法与下一节 **4.3** 中家目录的 `existingClaim` 一致。请保证 `sharedHome.volumeName` 与 `sharedSoftware.volumeName` **不相同**，以免卷名冲突。
 
 #### 共享卷上为 LDAP 用户创建家目录（`mkdir` / `chown`）
 
@@ -301,7 +328,7 @@ kubectl exec -n slurm deploy/slurm-login-slinky -- grep pam_mkhomedir /etc/pam.d
 
 1. **确认 UID/GID**（须与 LDAP `posixAccount` 的 `uidNumber` / `gidNumber` 一致）：
   - Login Pod 上 SSSD 已就绪时：
-     记下输出里的 `uid=`、`gid=` 数字。
+   记下输出里的 `uid=`、`gid=` 数字。
   - 若暂时无法 `id`，在 LDAP 上查该用户的 `uidNumber`、`gidNumber`。
 2. **创建目录并改属主**（将 `cuidong`、`10001`、`10001` 换成实际用户名与 uid/gid；`/home` 与 values 里 `sharedHome.mountPath` 一致）：
   ```bash
@@ -457,11 +484,11 @@ OCI 旧版 Slurm chart 若无顶层 `sssd` 模板，`**sssd.secretRef` 可能不
 
 ### 6.2 与 `examples/openldap-bitnami-minimal.yaml` 对齐的示例
 
-`examples/openldap-bitnami-minimal.yaml` 仅部署 **Bitnami OpenLDAP + TLS**（无 Web 管理界面）；Harbor 同步：`./hack/push-bitnami-openldap-to-harbor.sh`。需先用 `./hack/gen-openldap-bitnami-tls-secret.sh <namespace>` 生成 Secret `**openldap-bitnami-tls**`，再 `kubectl apply`。清单含 **两个 PVC**（`openldap-data`、`openldap-slapd-d`）分别挂 `**/bitnami/openldap/data**` 与 `**/bitnami/openldap/slapd.d**`，与 Compose 示例的 `**ldap/**` + `**slapd.d/**` 子目录等价；initContainer 对卷 **chown 1001**。若集群无默认 StorageClass，请在 PVC 上填写 `**storageClassName**`。目录根 `**dc=example,dc=org**`；管理 DN `**cn=admin,dc=example,dc=org**`，密码默认 `**admin**`（仅实验环境）。
+`examples/openldap-bitnami-minimal.yaml` 仅部署 **Bitnami OpenLDAP + TLS**（无 Web 管理界面）；Harbor 同步：`./hack/push-bitnami-openldap-to-harbor.sh`。需先用 `./hack/gen-openldap-bitnami-tls-secret.sh <namespace>` 生成 Secret `**openldap-bitnami-tls`**，再 `kubectl apply`。清单含 **两个 PVC**（`openldap-data`、`openldap-slapd-d`）分别挂 `**/bitnami/openldap/data`** 与 `**/bitnami/openldap/slapd.d**`，与 Compose 示例的 `**ldap/**` + `**slapd.d/**` 子目录等价；initContainer 对卷 **chown 1001**。若集群无默认 StorageClass，请在 PVC 上填写 `**storageClassName`**。目录根 `**dc=example,dc=org**`；管理 DN `**cn=admin,dc=example,dc=org**`，密码默认 `**admin**`（仅实验环境）。
 
-**Docker Compose（与上述 K8s 清单对齐，同样无 Web UI）**：`examples/docker-compose.openldap.yml` 为 **Bitnami OpenLDAP + TLS** 单机栈。先执行 `./hack/gen-openldap-compose-certs.sh` 生成 `examples/openldap-certs/`（并按文件头注释对证书做 **chown/chmod**），再 `docker compose -f examples/docker-compose.openldap.yml up -d`。OpenLDAP 在 Compose 内监听 **389/636**，`**cap_add: [NET_BIND_SERVICE]`**。持久化：`**LDAP_DATA_ROOT**`（默认 `examples/data/`）下 `**ldap/**` 与 `**slapd.d/**` 分别挂载；仅挂 `**data**` 会在 `**docker compose down**` 后丢失容器层里的 `**slapd.d**`，导致再次 `**up**` 时 slapd 异常退出。`**openldap-data-init**` 做 **mkdir + chown 1001**。镜像可用 `**OPENLDAP_IMAGE**` 指向 Harbor。
+**Docker Compose（与上述 K8s 清单对齐，同样无 Web UI）**：`examples/docker-compose.openldap.yml` 为 **Bitnami OpenLDAP + TLS** 单机栈。先执行 `./hack/gen-openldap-compose-certs.sh` 生成 `examples/openldap-certs/`（并按文件头注释对证书做 **chown/chmod**），再 `docker compose -f examples/docker-compose.openldap.yml up -d`。OpenLDAP 在 Compose 内监听 **389/636**，`**cap_add: [NET_BIND_SERVICE]`**。持久化：`**LDAP_DATA_ROOT`**（默认 `examples/data/`）下 `**ldap/**` 与 `**slapd.d/**` 分别挂载；仅挂 `**data**` 会在 `**docker compose down**` 后丢失容器层里的 `**slapd.d**`，导致再次 `**up**` 时 slapd 异常退出。`**openldap-data-init**` 做 **mkdir + chown 1001**。镜像可用 `**OPENLDAP_IMAGE`** 指向 Harbor。
 
-**可选：phpLDAPadmin v2** 不在上述示例清单中；若需浏览器管理目录，可自行部署 `**phpldapadmin/phpldapadmin**`（Harbor：`./hack/push-phpldapadmin-to-harbor.sh`），并连同一 LDAP Service。**网页登录**常用预置 `**user01` / `bitnami1`**（uid），勿在登录框用 `**cn=admin**` 当用户名。PLA 的 `**LDAP_USERNAME`/`LDAP_PASSWORD**` 是应用连目录用的管理 DN（`cn=admin,dc=example,dc=org` / `admin`），与登录框不是同一概念。默认 `**LDAP_LOGIN_ATTR=uid`**；若要用完整 DN 登录，将 `**LDAP_LOGIN_ATTR**` 设为 `**DN**`。
+**可选：phpLDAPadmin v2** 不在上述示例清单中；若需浏览器管理目录，可自行部署 `**phpldapadmin/phpldapadmin`**（Harbor：`./hack/push-phpldapadmin-to-harbor.sh`），并连同一 LDAP Service。**网页登录**常用预置 `**user01` / `bitnami1`**（uid），勿在登录框用 `**cn=admin`** 当用户名。PLA 的 `**LDAP_USERNAME`/`LDAP_PASSWORD**` 是应用连目录用的管理 DN（`cn=admin,dc=example,dc=org` / `admin`），与登录框不是同一概念。默认 `**LDAP_LOGIN_ATTR=uid**`；若要用完整 DN 登录，将 `**LDAP_LOGIN_ATTR**` 设为 `**DN**`。
 
 假设 OpenLDAP 在命名空间 `**openldap-test**`，Service 名 `**openldap**`；Slurm 在 `**slurm**`。集群内应用应使用 **FQDN** 访问 LDAP：
 
@@ -666,12 +693,12 @@ kubectl rollout restart deploy/slurm-operator -n slinky
 ### 7. `examples/openldap-bitnami-minimal.yaml` 部署后 openldap **ContainerCreating** / **CrashLoopBackOff** / PVC **Pending**
 
 - **openldap 长期 ContainerCreating**，`kubectl describe pod` 事件为 `**secret "openldap-bitnami-tls" not found`**：必须先执行 `./hack/gen-openldap-bitnami-tls-secret.sh <namespace>` 再 apply，或补建同名 Secret 后删除 Pod 重建。
-- **PVC 一直 Pending**：多为无默认 **StorageClass** 或可用动态供给。在 `openldap-data` / `openldap-slapd-d` 两个 PVC 上设置合适的 `**storageClassName**`，或预先创建匹配的 PV。
+- **PVC 一直 Pending**：多为无默认 **StorageClass** 或可用动态供给。在 `openldap-data` / `openldap-slapd-d` 两个 PVC 上设置合适的 `**storageClassName`**，或预先创建匹配的 PV。
 - **网上镜像是不是坏的？**：**不是。** 官方路径应为 `**docker.io/bitnamilegacy/openldap`**（Debian 一代）。勿与 `**docker.io/bitnami/openldap`**（新代/Photon）混淆。推送前可在联网机器执行 `./hack/verify-bitnami-openldap-image.sh`。
 - **Docker Hub 的 digest 与 Harbor 的 digest 为何不同？**：**正常现象。** 同一镜像 `docker tag` 后 `docker push` 到 Harbor，`docker push` 结尾打印的 digest（例如 `**sha256:627f63…`**）与 Docker Hub 上该 tag 的 digest（例如 `**sha256:687f14…`**）**可以不同**：OCI **manifest** 内容含 registry/仓库名等元数据，跨 registry **顶层 digest** 会变；**层（layer）**一致即可。因此 不要在 `image` 里把 `harbor.../bitnami-openldap` 写成 `...@sha256:687f14…`（那是 Docker Hub 的 manifest digest）；应使用 Harbor 的 tag，或 `**...@sha256:<Harbor 推送后显示的 digest>`**。
-- **openldap CrashLoopBackOff**，`**BITNAMI_DEBUG=true`** 时日志出现 `**slapadd: could not add entry dn="cn=config"`**（或停在 `**Creating slapd.ldif`**）：勿用 emptyDir/PVC **整卷**挂载 **`/bitnami/openldap`**（单卷盖住整棵树会触发 LMDB 初始化失败）。本仓库示例使用 **两个子路径卷**：`**/bitnami/openldap/data**` 与 `**/bitnami/openldap/slapd.d**`，并配合 **fsGroup + initContainer chown**。若仍怀疑镜像，再核对 Harbor 与 `**./hack/verify-bitnami-openldap-image.sh`**。
-- `**daemon: bind(6) failed errno=13 (Permission denied)`** / `**OpenLDAP failed to start`**（已通过 `**Creating slapd.ldif**` 之后）：Bitnami 以 **UID 1001** 运行，**默认不能绑定 389/636**。示例为容器内 `**LDAP_PORT_NUMBER=1389`、`LDAP_LDAPS_PORT_NUMBER=1636`**，Service 仍对外 389/636，客户端 `**ldap://…:389`** 无需改。若坚持容器内监听 389，可为容器 `**capabilities.add: [NET_BIND_SERVICE]**`（部分受限集群上能力可能仍不生效）。
-- **若自行部署 phpLDAPadmin**：探针若指向 `/` 可能重定向到 `/login`，在 LDAP 未就绪时易 **HTTP 500**；可改为探针访问 Laravel `**/up**`。openldap 未 Running 时浏览器 `/login` 仍可能 500，待 LDAP 就绪后刷新。
+- **openldap CrashLoopBackOff**，`**BITNAMI_DEBUG=true`** 时日志出现 `**slapadd: could not add entry dn="cn=config"`**（或停在 `**Creating slapd.ldif`**）：勿用 emptyDir/PVC **整卷**挂载 `**/bitnami/openldap`**（单卷盖住整棵树会触发 LMDB 初始化失败）。本仓库示例使用 **两个子路径卷**：`**/bitnami/openldap/data`** 与 `**/bitnami/openldap/slapd.d**`，并配合 **fsGroup + initContainer chown**。若仍怀疑镜像，再核对 Harbor 与 `**./hack/verify-bitnami-openldap-image.sh`**。
+- `**daemon: bind(6) failed errno=13 (Permission denied)`** / `**OpenLDAP failed to start`**（已通过 `**Creating slapd.ldif`** 之后）：Bitnami 以 UID 1001 运行，默认不能绑定 389/636。示例为容器内 `**LDAP_PORT_NUMBER=1389`、`LDAP_LDAPS_PORT_NUMBER=1636**`，Service 仍对外 389/636，客户端 `**ldap://…:389`** 无需改。若坚持容器内监听 389，可为容器 `**capabilities.add: [NET_BIND_SERVICE]`**（部分受限集群上能力可能仍不生效）。
+- **若自行部署 phpLDAPadmin**：探针若指向 `/` 可能重定向到 `/login`，在 LDAP 未就绪时易 **HTTP 500**；可改为探针访问 Laravel `**/up`**。openldap 未 Running 时浏览器 `/login` 仍可能 500，待 LDAP 就绪后刷新。
 
 ### 8. 自建 Operator 镜像：`go mod download` 超时（IPv6 / 代理 / 国内网络）
 
@@ -742,13 +769,29 @@ kubectl exec -n slurm slurm-worker-slinky-0 -c slurmd -- sh -lc 'for c in apptai
 - `login-hpc`（基于 `login`）
 - `worker-hpc`（基于 `slurmd`）
 
-该示例会安装：
+### 镜像内会安装的内容
 
-- 容器运行时：优先 `apptainer`；若仓库无该包名则回退 `singularity-container`，并自动提供 `apptainer` / `singularity` 兼容命令
-- 模块系统：`lmod`（提供 `module` / `ml` / `modulecmd`）
-- 编译链：`build-essential`、`gfortran`、`cmake`
-- 常用工具：`python3-pip`、`jq`、`rsync`
-- PAM：`libpam-modules` 并追加 `pam_mkhomedir` 到 `/etc/pam.d/common-session`（不存在时才追加）
+- **容器运行时**：优先 `apptainer`；若仓库无该包名则回退 `singularity-container`，并自动提供 `apptainer` / `singularity` 兼容命令
+- **模块系统**：`lmod`（提供 `module` / `ml` / `modulecmd`）
+- **编译链**：`build-essential`、`gfortran`、`cmake`
+- **Python**：`python3-pip`、`python3-venv`（隔离虚拟环境；重型科学栈仍建议走共享盘或 Apptainer）
+- **网络与下载**：`curl`、`wget`、`ca-certificates`
+- **版本与归档**：`git`；`unzip`、`zip`、`xz-utils`、`zstd`
+- **登录/传输（尤其 Login）**：`openssh-client`（`ssh` / `scp` / `sftp`）
+- **编辑与查看**：`vim` 仅在 **`login-hpc`** 目标中安装（登录节点改脚本）；**`worker-hpc`** 不含 `vim`，作业与排障可在 login 或共享 `$HOME` 上编辑；两侧均有 `less`、`file`
+- **并行与观测**：`numactl`；`procps`、`htop`
+- **既有条目**：`jq`、`rsync`
+- **PAM**：`libpam-modules`，并在 `/etc/pam.d/common-session` 中追加 `pam_mkhomedir`（仅当尚未配置时）
+
+### 刻意不放进镜像的（与 BeeGFS / `sharedSoftware` 分工）
+
+- **MPI 与应用软件**（OpenMPI、GROMACS、MATLAB 等）：体积大、版本多、需与 Slurm/PMI 对齐，适合安装在 **[第四节](#四controller-持久化与存储beegfs-csi)** `**sharedSoftware`（见 4.2.1）** 卷（如 `/software`）并通过 Lmod 暴露。
+- **RDMA / InfiniBand 用户态工具**（如 `rdma-core`、`ibverbs-utils`）：是否与 Pod 内挂载的宿主设备/库匹配依赖集群实现，盲装易与节点驱动冲突；需要时由运维按规范加入镜像或绑定挂载。
+- **重型 Python/科学计算栈**：仍以共享盘上的 module、虚拟环境或 Apptainer 镜像为主，避免把 Conda/大量 wheels 打进基础 Slurm 镜像。
+
+### Lmod 与共享软件目录（`/software/modulefiles`）
+
+镜像内写入 `**/etc/profile.d/slurm-shared-software-modulepath.sh`**：当存在目录 `**/software/modulefiles**` 时，把该路径**前置**到 `MODULEPATH`（与 Helm 默认 `sharedSoftware.mountPath=/software` 一致；未挂载卷或目录不存在时脚本不报错）。若你使用其它挂载路径，请同步修改该 profile 或改用站点级 Lmod 配置。
 
 ### 10.1 构建并推送到 Harbor
 
@@ -758,7 +801,7 @@ kubectl exec -n slurm slurm-worker-slinky-0 -c slurmd -- sh -lc 'for c in apptai
 export HARBOR_REGISTRY="harbor.aix.com:8443"
 export HARBOR_PROJECT="slinkyproject"
 export BASE_TAG="25.11-ubuntu24.04"
-export NEW_TAG="25.11-ubuntu24.04-hpc-tools-v3"
+export NEW_TAG="25.11-ubuntu24.04-hpc-tools-v4"
 export https_proxy="http://127.0.0.1:7890"
 export http_proxy="http://127.0.0.1:7890"
 export all_proxy="socks5://127.0.0.1:7890"
@@ -767,6 +810,8 @@ export NO_PROXY="127.0.0.1,localhost,harbor.aix.com,.aix.com,.svc,.cluster.local
 export no_proxy="${NO_PROXY}"
 # 若代理访问 archive.ubuntu.com 频繁 502，可改用国内镜像（与 Dockerfile 中 APT_MIRROR_HOST 一致）：
 export APT_MIRROR_HOST="mirrors.aliyun.com"
+
+docker buildx use default
 
 docker buildx build \
   -f docs/examples/Dockerfile.hpc-tools \
@@ -809,10 +854,28 @@ docker buildx build \
 - `--build-arg HTTP_PROXY/HTTPS_PROXY/ALL_PROXY/NO_PROXY` 将代理显式传入 build 阶段，避免 `apt-get` 在 BuildKit 中不走代理；小写 `http_proxy` 等同传入，容器内 `apt` 更稳定。
 - `APT_MIRROR_HOST` 将 `archive.ubuntu.com` / `security.ubuntu.com` 替换为镜像站，**可显著降低**「HTTP 代理 → 官方 Ubuntu 源」导致的 `502 Bad Gateway`；不需要时可设为空字符串。
 - `NO_PROXY` 含 Harbor 域名时，`docker push` 可走内网直连，避免大层经本机代理失败。
+- 若出现 `**http: server gave HTTP response to HTTPS client`**（对 `harbor…:8443` 拉取 manifest 失败）：说明 Registry 该端口是 **明文 HTTP**，客户端却按 **HTTPS** 去连。
+  - **仅用默认 `docker` 驱动**（`docker build` 或未单独 `buildx create` 的默认 builder）时：在 `**/etc/docker/daemon.json`** 配 `"insecure-registries": ["harbor.aix.com:8443"]` 并重启 Docker **会生效**。
+  - **使用 `docker-container` 驱动**的 buildx（日志里常见 `docker-container:…-builder…`）时：拉基础镜像的是 **BuildKit 容器内的 buildkitd**，**不读**宿主机 `daemon.json`。需要给该 builder 一份 **BuildKit 配置** 并在创建时挂上，例如先写 `buildkit-harbor.toml`：
+    ```toml
+    [registry."harbor.aix.com:8443"]
+      http = true
+      insecure = true
+    ```
+    再 **`docker buildx rm <旧 builder 名>`**（若需保留名字）后执行  
+    `docker buildx create --name <名> --driver docker-container --config /绝对路径/buildkit-harbor.toml …`  
+    （若你原先用了 `--driver-opt network=host` 等，创建命令里一并保留），然后 **`docker buildx use <名>`**。推送阶段若仍报证书/HTTPS 问题，可查阅 Buildx 文档里 **`registry.insecure=true`** 等与 `--output` 相关的选项。
+  - **临时绕过**：分**两条命令**执行（不要把 `-f` 接到 `use` 后面；`-f` 只属于 `build`）：
+    ```bash
+    docker buildx use default
+    docker buildx build -f docs/examples/Dockerfile.hpc-tools …
+    ```
+    第一行只切换当前 builder；第二行与上文 10.1 示例一致，把 `…` 换成你的 `--target`、`--build-arg`、`-t`、`--push` 等。（能力集可能与 `docker-container` 自定义 builder 略有差异。）
+  - 根本做法仍是给 Harbor 配好 TLS，使客户端无需把仓库标成 insecure。
 - 若构建日志出现 `E: Unable to locate package apptainer`（Ubuntu 24.04 常见），当前示例会自动回退安装 `singularity-container` 并创建 `apptainer` 兼容命令，无需手工改 Dockerfile。
 - 若仍遇 `502`，可保留 `APT_MIRROR_HOST` 后重试；Dockerfile 内仍有 apt 重试与 `--fix-missing`。
 
-> 已在环境中用上述参数完成一次构建并推送：`${HARBOR_REGISTRY}/${HARBOR_PROJECT}/login:25.11-ubuntu24.04-hpc-tools-v3` 与 `.../slurmd:25.11-ubuntu24.04-hpc-tools-v3`（以你本机 `docker login` 与网络为准）。
+> 若曾使用旧 tag（如 `…-hpc-tools-v3`），本次 Dockerfile 增包后建议递增 tag（示例中为 `…-hpc-tools-v4`）再构建推送，避免与旧层混淆（以你本机 `docker login` 与网络为准）。
 
 ### 10.2 在 `values.yaml` 使用新镜像
 
@@ -824,14 +887,14 @@ loginsets:
     login:
       image:
         repository: harbor.example.com:8443/slinkyproject/login
-        tag: 25.11-ubuntu24.04-hpc-tools-v3
+        tag: 25.11-ubuntu24.04-hpc-tools-v4
 
 nodesets:
   slinky:
     slurmd:
       image:
         repository: harbor.example.com:8443/slinkyproject/slurmd
-        tag: 25.11-ubuntu24.04-hpc-tools-v3
+        tag: 25.11-ubuntu24.04-hpc-tools-v4
 ```
 
 执行升级：
@@ -845,11 +908,16 @@ helm upgrade --install slurm ./helm/slurm \
 ### 10.3 升级后快速验证
 
 ```bash
-kubectl exec -n slurm deploy/slurm-login-slinky -- sh -lc 'command -v apptainer module gcc gfortran cmake pip3 jq rsync'
-kubectl exec -n slurm slurm-worker-slinky-0 -c slurmd -- sh -lc 'command -v apptainer module gcc gfortran cmake pip3 jq rsync'
+# 工具是否在 PATH 内（Login / Worker）
+kubectl exec -n slurm deploy/slurm-login-slinky -- sh -lc 'for c in apptainer git curl wget vim numactl unzip zstd gcc gfortran cmake pip3 jq rsync htop; do command -v "$c" >/dev/null && echo OK "$c" || echo MISS "$c"; done'
+kubectl exec -n slurm slurm-worker-slinky-0 -c slurmd -- sh -lc 'for c in apptainer git curl wget numactl unzip zstd gcc gfortran cmake pip3 jq rsync htop; do command -v "$c" >/dev/null && echo OK "$c" || echo MISS "$c"; done'
+
 kubectl exec -n slurm deploy/slurm-login-slinky -- grep pam_mkhomedir /etc/pam.d/common-session
 kubectl exec -n slurm slurm-worker-slinky-0 -c slurmd -- grep pam_mkhomedir /etc/pam.d/common-session
 kubectl exec -n slurm deploy/slurm-login-slinky -- sh -lc 'apptainer --version || singularity --version'
+
+# 共享软件 MODULEPATH（需已挂载 /software 且存在 /software/modulefiles 才有效果）
+kubectl exec -n slurm deploy/slurm-login-slinky -- sh -lc 'test -f /etc/profile.d/slurm-shared-software-modulepath.sh && echo OK profile.d'
 ```
 
 若验证缺少 `module` 命令，可先在 shell 中加载初始化脚本再试：
@@ -858,6 +926,12 @@ kubectl exec -n slurm deploy/slurm-login-slinky -- sh -lc 'apptainer --version |
 source /etc/profile.d/lmod.sh 2>/dev/null || true
 source /etc/profile.d/modules.sh 2>/dev/null || true
 module --version || true
+```
+
+启用 `sharedSoftware` 后，在 Pod 内确认 `MODULEPATH` 是否包含共享模块目录（需先创建 `/software/modulefiles`）：
+
+```bash
+kubectl exec -n slurm deploy/slurm-login-slinky -- bash -lc 'source /etc/profile.d/lmod.sh 2>/dev/null; source /etc/profile.d/slurm-shared-software-modulepath.sh 2>/dev/null; echo "MODULEPATH=$MODULEPATH"'
 ```
 
 ---

@@ -24,6 +24,28 @@ SPDX-License-Identifier: Apache-2.0
 {{- $mounts := $login.volumeMounts | default list -}}
 {{- $_ := set $login "volumeMounts" (append $mounts (dict "name" $vn "mountPath" $mountPath)) -}}
 {{- end -}}
+{{- $swClaim := include "slurm.sharedSoftware.claimName" $ | trim -}}
+{{- if and (default false $.Values.sharedSoftware.enabled) (ne $swClaim "") -}}
+{{- $ss := $.Values.sharedSoftware | default dict -}}
+{{- $swMount := $ss.mountPath | default "/software" -}}
+{{- $swVol := $ss.volumeName | default "shared-software" -}}
+{{- $vols2 := $podSpec.volumes | default list -}}
+{{- $swPvcVol := dict "name" $swVol "persistentVolumeClaim" (dict "claimName" $swClaim) -}}
+{{- $_ := set $podSpec "volumes" (append $vols2 $swPvcVol) -}}
+{{- $swMounts := $login.volumeMounts | default list -}}
+{{- $_ := set $login "volumeMounts" (append $swMounts (dict "name" $swVol "mountPath" $swMount)) -}}
+{{- end -}}
+{{- $sdClaim := include "slurm.sharedData.claimName" $ | trim -}}
+{{- if and (default false $.Values.sharedData.enabled) (ne $sdClaim "") -}}
+{{- $sd := $.Values.sharedData | default dict -}}
+{{- $sdMount := $sd.mountPath | default "/data" -}}
+{{- $sdVol := $sd.volumeName | default "shared-data" -}}
+{{- $vols3 := $podSpec.volumes | default list -}}
+{{- $sdPvcVol := dict "name" $sdVol "persistentVolumeClaim" (dict "claimName" $sdClaim) -}}
+{{- $_ := set $podSpec "volumes" (append $vols3 $sdPvcVol) -}}
+{{- $sdMounts := $login.volumeMounts | default list -}}
+{{- $_ := set $login "volumeMounts" (append $sdMounts (dict "name" $sdVol "mountPath" $sdMount)) -}}
+{{- end -}}
 {{- $podTemplate := dict "metadata" $metadata "spec" $podSpec }}
 ---
 apiVersion: slinky.slurm.net/v1beta1

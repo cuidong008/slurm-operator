@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-
 #
 # Build two hardened variants for Slurm images:
 # - target: login-hpc  (base: login image)
@@ -52,14 +50,30 @@ RUN set -eux; \
     fi; \
     retry apt-get -o Acquire::Retries=5 update; \
     retry apt-get install -y --no-install-recommends --fix-missing \
-      lmod \
       build-essential \
-      gfortran \
+      ca-certificates \
       cmake \
-      python3-pip \
+      curl \
+      file \
+      git \
+      gfortran \
+      htop \
       jq \
+      less \
+      libpam-modules \
+      lmod \
+      numactl \
+      openssh-client \
+      procps \
+      python3-pip \
+      python3-venv \
       rsync \
-      libpam-modules; \
+      unzip \
+      vim \
+      wget \
+      xz-utils \
+      zip \
+      zstd; \
     if apt-cache show apptainer >/dev/null 2>&1; then \
       retry apt-get install -y --no-install-recommends --fix-missing apptainer; \
       command -v singularity >/dev/null 2>&1 || ln -sf "$(command -v apptainer)" /usr/local/bin/singularity; \
@@ -72,7 +86,17 @@ RUN set -eux; \
     fi; \
     rm -rf /var/lib/apt/lists/*; \
     grep -q "pam_mkhomedir.so" /etc/pam.d/common-session || \
-      echo "session required pam_mkhomedir.so skel=/etc/skel umask=0022" >> /etc/pam.d/common-session
+      echo "session required pam_mkhomedir.so skel=/etc/skel umask=0022" >> /etc/pam.d/common-session; \
+    printf '%s\n' \
+      '# Prepends Lmod MODULEPATH when Helm sharedSoftware PVC mounts /software (see docs 4.2.1).' \
+      'if [ -d /software/modulefiles ]; then' \
+      '  case ":${MODULEPATH:-}:" in' \
+      '    *":/software/modulefiles:"*) ;;' \
+      '    *) export MODULEPATH="/software/modulefiles${MODULEPATH:+:$MODULEPATH}" ;;' \
+      '  esac' \
+      'fi' \
+      > /etc/profile.d/slurm-shared-software-modulepath.sh \
+      && chmod 0644 /etc/profile.d/slurm-shared-software-modulepath.sh
 
 FROM ${BASE_WORKER_IMAGE} AS worker-hpc
 
@@ -88,6 +112,7 @@ ARG APT_MIRROR_HOST
 ENV HTTP_PROXY=${HTTP_PROXY} HTTPS_PROXY=${HTTPS_PROXY} NO_PROXY=${NO_PROXY}
 ENV http_proxy=${http_proxy} https_proxy=${https_proxy} no_proxy=${no_proxy}
 
+# No vim on worker: edit on login or $HOME on shared storage; keeps slurmd image smaller.
 RUN set -eux; \
     retry() { \
       n=0; \
@@ -113,14 +138,29 @@ RUN set -eux; \
     fi; \
     retry apt-get -o Acquire::Retries=5 update; \
     retry apt-get install -y --no-install-recommends --fix-missing \
-      lmod \
       build-essential \
-      gfortran \
+      ca-certificates \
       cmake \
-      python3-pip \
+      curl \
+      file \
+      git \
+      gfortran \
+      htop \
       jq \
+      less \
+      libpam-modules \
+      lmod \
+      numactl \
+      openssh-client \
+      procps \
+      python3-pip \
+      python3-venv \
       rsync \
-      libpam-modules; \
+      unzip \
+      wget \
+      xz-utils \
+      zip \
+      zstd; \
     if apt-cache show apptainer >/dev/null 2>&1; then \
       retry apt-get install -y --no-install-recommends --fix-missing apptainer; \
       command -v singularity >/dev/null 2>&1 || ln -sf "$(command -v apptainer)" /usr/local/bin/singularity; \
@@ -133,4 +173,14 @@ RUN set -eux; \
     fi; \
     rm -rf /var/lib/apt/lists/*; \
     grep -q "pam_mkhomedir.so" /etc/pam.d/common-session || \
-      echo "session required pam_mkhomedir.so skel=/etc/skel umask=0022" >> /etc/pam.d/common-session
+      echo "session required pam_mkhomedir.so skel=/etc/skel umask=0022" >> /etc/pam.d/common-session; \
+    printf '%s\n' \
+      '# Prepends Lmod MODULEPATH when Helm sharedSoftware PVC mounts /software (see docs 4.2.1).' \
+      'if [ -d /software/modulefiles ]; then' \
+      '  case ":${MODULEPATH:-}:" in' \
+      '    *":/software/modulefiles:"*) ;;' \
+      '    *) export MODULEPATH="/software/modulefiles${MODULEPATH:+:$MODULEPATH}" ;;' \
+      '  esac' \
+      'fi' \
+      > /etc/profile.d/slurm-shared-software-modulepath.sh \
+      && chmod 0644 /etc/profile.d/slurm-shared-software-modulepath.sh
