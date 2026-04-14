@@ -2,6 +2,104 @@
 
 Run [Slurm] on [Kubernetes], by [SchedMD]. A [Slinky] project.
 
+
+---
+
+## Custom image builds (aixx)
+
+以下命令均在 **aixx 仓库根目录** 执行（构建上下文为 `.`）。需要代理时先导出 `http_proxy`、`https_proxy`、`all_proxy`；`--network=host` 常用于缓解构建阶段 DNS/代理异常。
+
+> **Shell 续行：** 行末的反斜杠 `\` 必须是该行 **最后一个字符**，`\` 后面不能有空格再回车。否则 zsh 会把下一行当成新命令，可能出现 `unable to prepare context: path " " not found` 与 `command not found: -f`。
+
+### `Dockerfile.hpc-tools` — MPICH 与常用 HPC 包
+
+| `--target`     | 用途           | 基础镜像角色   |
+| -------------- | -------------- | -------------- |
+| `login-hpc`    | 登录节点       | `login`        |
+| `worker-hpc`   | 计算节点 slurmd | `slurmd`       |
+
+```bash
+# 登录节点：默认 MPI 为 MPICH（update-alternatives）
+docker build --network=host \
+  -f install/slurm-operator/docs/examples/Dockerfile.hpc-tools \
+  --target login-hpc \
+  -t harbor.aix.com:8443/slinkyproject/slurmd:25.11-ubuntu24.04-hpc \
+  --build-arg http_proxy="$http_proxy" \
+  --build-arg https_proxy="$https_proxy" \
+  --build-arg all_proxy="$all_proxy" \
+  --build-arg HTTP_PROXY="$http_proxy" \
+  --build-arg HTTPS_PROXY="$https_proxy" \
+  --build-arg ALL_PROXY="$all_proxy" \
+  .
+
+# 计算节点
+docker build --network=host \
+  -f install/slurm-operator/docs/examples/Dockerfile.hpc-tools \
+  --target worker-hpc \
+  -t harbor.aix.com:8443/slinkyproject/slurmd:25.11-ubuntu24.04-openmpi-hpc \
+  --build-arg http_proxy="$http_proxy" \
+  --build-arg https_proxy="$https_proxy" \
+  --build-arg all_proxy="$all_proxy" \
+  --build-arg HTTP_PROXY="$http_proxy" \
+  --build-arg HTTPS_PROXY="$https_proxy" \
+  --build-arg ALL_PROXY="$all_proxy" \
+  .
+```
+
+### `Dockerfile.openmpi-slurm` — 源码 Open MPI 5.x（外部 PMIx，无 MPICH）
+
+默认 **Open MPI 5.0.x**（`OPENMPI_VERSION` / `OPENMPI_SERIES` 可改）。v4.1 在 Slurm `srun` 下仍常走内置 **pmix3x** 并报 `pmix3x_client.c`（见 [open-mpi/ompi#10307](https://github.com/open-mpi/ompi/issues/10307)）；v5 已去掉 `--with-pmi`，用 **`--with-pmix=external`**（`libpmix-dev` / 运行时 `libpmix2`）与 Slurm 的 PMIx 对接。**升级 major 后请重新用 `mpicc` 编译应用**（`libmpi.so` 主版本号会变）。
+
+安装目录为 `/opt/openmpi`，通过 `/usr/local/bin` 下符号链接优先于系统 `mpicc`/`mpirun`。计算节点镜像已含 Slinky 的 `slurm-smd-libpmi2-0`；最终镜像**不再** apt 安装 Ubuntu 的 `libpmi2-0`（与 Slinky 冲突且 OMPI5 不依赖）。**登录镜像**安装 `build-essential`/`gfortran`；**worker** 不装编译器。若 apt 报 `502`，Dockerfile 已对官方源配置 **DIRECT**；仍失败可设 `NO_PROXY` 或 `--build-arg APT_MIRROR_HOST=…`。
+
+```bash
+# 计算节点（slurmd）
+docker build --network=host \
+  -f install/slurm-operator/docs/examples/Dockerfile.openmpi-slurm \
+  --target worker-openmpi-slurm \
+  -t harbor.aix.com:8443/slinkyproject/slurmd:25.11-ubuntu24.04-openmpi \
+  --build-arg http_proxy="$http_proxy" \
+  --build-arg https_proxy="$https_proxy" \
+  --build-arg all_proxy="$all_proxy" \
+  --build-arg HTTP_PROXY="$http_proxy" \
+  --build-arg HTTPS_PROXY="$https_proxy" \
+  --build-arg ALL_PROXY="$all_proxy" \
+  .
+
+# 登录节点（login；`-t` 需与集群 LoginSet 使用的镜像一致）
+docker build --network=host \
+  -f install/slurm-operator/docs/examples/Dockerfile.openmpi-slurm \
+  --target login-openmpi-slurm \
+  -t harbor.aix.com:8443/slinkyproject/login:25.11-ubuntu24.04-openmpi \
+  --build-arg http_proxy="$http_proxy" \
+  --build-arg https_proxy="$https_proxy" \
+  --build-arg all_proxy="$all_proxy" \
+  --build-arg HTTP_PROXY="$http_proxy" \
+  --build-arg HTTPS_PROXY="$https_proxy" \
+  --build-arg ALL_PROXY="$all_proxy" \
+  .
+```
+
+**多节点 `srun ./prog` 报 “not built with SLURM's PMI support” / `pmix3x_client.c` 时：**  
+1）**计算节点**必须使用 **`worker-openmpi-slurm`**；`ldd ./prog` 中 `libmpi` 须来自 **`/opt/openmpi/lib`**。  
+2）若已用 **Open MPI 4.1 + 外部 PMIx** 仍出现 **`pmix3x_client`**：属 v4 已知问题（内部 PMIx 与外部混用）。请改用本仓库默认的 **Open MPI 5.x** 镜像并全量滚动节点。  
+3）作业中可优先用 **`mpirun ./prog`**（在 Slurm 已分配资源的前提下），一般不必再写 `-np`。  
+4）若必须用 `srun`，按站点 **`srun --mpi=list`** 尝试 **`--mpi=pmix`** / **`pmix_v3`** 等。
+
+### SCOW Slurm Adapter（`Dockerfile.login`）
+
+构建上下文目录须包含 `scow-slurm-adapter-amd64` 及 Dockerfile 中 `COPY` 所引用的文件（见该目录下 Dockerfile 注释）。从仓库根目录执行：
+
+```bash
+docker build \
+  -f install/slurm-operator/deploy/scow-slurm-adapter/Dockerfile.login \
+  -t harbor.aix.com:8443/library/scow-slurm-adapter-login:1.6.2 \
+  install/slurm-operator/deploy/scow-slurm-adapter
+```
+
+---
+
+
 ## Table of Contents
 
 <!-- mdformat-toc start --slug=github --no-anchors --maxlevel=6 --minlevel=1 -->

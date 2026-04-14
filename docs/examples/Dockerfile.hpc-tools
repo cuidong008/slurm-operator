@@ -15,172 +15,190 @@ FROM ${BASE_LOGIN_IMAGE} AS login-hpc
 
 USER root
 
-ARG HTTP_PROXY
-ARG HTTPS_PROXY
-ARG NO_PROXY
-ARG http_proxy
-ARG https_proxy
-ARG no_proxy
 ARG APT_MIRROR_HOST
-ENV HTTP_PROXY=${HTTP_PROXY} HTTPS_PROXY=${HTTPS_PROXY} NO_PROXY=${NO_PROXY}
-ENV http_proxy=${http_proxy} https_proxy=${https_proxy} no_proxy=${no_proxy}
 
 RUN set -eux; \
-    retry() { \
-      n=0; \
-      until [ "$n" -ge 5 ]; do \
-        "$@" && break; \
-        n=$((n+1)); \
-        echo "retry $n/5: $*"; \
-        sleep $((n*3)); \
-      done; \
-      [ "$n" -lt 5 ]; \
-    }; \
-    export DEBIAN_FRONTEND=noninteractive; \
-    if [ -n "${APT_MIRROR_HOST}" ]; then \
-      for f in /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list; do \
-        [ -f "$f" ] || continue; \
-        sed -i \
-          -e "s|http://archive.ubuntu.com/ubuntu|http://${APT_MIRROR_HOST}/ubuntu|g" \
-          -e "s|https://archive.ubuntu.com/ubuntu|http://${APT_MIRROR_HOST}/ubuntu|g" \
-          -e "s|http://security.ubuntu.com/ubuntu|http://${APT_MIRROR_HOST}/ubuntu|g" \
-          -e "s|https://security.ubuntu.com/ubuntu|http://${APT_MIRROR_HOST}/ubuntu|g" \
-          "$f" || true; \
-      done; \
-    fi; \
-    retry apt-get -o Acquire::Retries=5 update; \
-    retry apt-get install -y --no-install-recommends --fix-missing \
-      build-essential \
-      ca-certificates \
-      cmake \
-      curl \
-      file \
-      git \
-      gfortran \
-      htop \
-      jq \
-      less \
-      libpam-modules \
-      lmod \
-      numactl \
-      openssh-client \
-      procps \
-      python3-pip \
-      python3-venv \
-      rsync \
-      unzip \
-      vim \
-      wget \
-      xz-utils \
-      zip \
-      zstd; \
-    if apt-cache show apptainer >/dev/null 2>&1; then \
-      retry apt-get install -y --no-install-recommends --fix-missing apptainer; \
-      command -v singularity >/dev/null 2>&1 || ln -sf "$(command -v apptainer)" /usr/local/bin/singularity; \
-    elif apt-cache show singularity-container >/dev/null 2>&1; then \
-      retry apt-get install -y --no-install-recommends --fix-missing singularity-container; \
-      command -v apptainer >/dev/null 2>&1 || ln -sf "$(command -v singularity)" /usr/local/bin/apptainer; \
-    else \
-      echo "ERROR: neither apptainer nor singularity-container package found in apt repositories"; \
-      exit 1; \
-    fi; \
-    rm -rf /var/lib/apt/lists/*; \
-    grep -q "pam_mkhomedir.so" /etc/pam.d/common-session || \
-      echo "session required pam_mkhomedir.so skel=/etc/skel umask=0022" >> /etc/pam.d/common-session; \
-    printf '%s\n' \
-      '# Prepends Lmod MODULEPATH when Helm sharedSoftware PVC mounts /software (see docs 4.2.1).' \
-      'if [ -d /software/modulefiles ]; then' \
-      '  case ":${MODULEPATH:-}:" in' \
-      '    *":/software/modulefiles:"*) ;;' \
-      '    *) export MODULEPATH="/software/modulefiles${MODULEPATH:+:$MODULEPATH}" ;;' \
-      '  esac' \
-      'fi' \
-      > /etc/profile.d/slurm-shared-software-modulepath.sh \
-      && chmod 0644 /etc/profile.d/slurm-shared-software-modulepath.sh
+  retry() { \
+  n=0; \
+  until [ "$n" -ge 5 ]; do \
+  "$@" && break; \
+  n=$((n+1)); \
+  echo "retry $n/5: $*"; \
+  sleep $((n*3)); \
+  done; \
+  [ "$n" -lt 5 ]; \
+  }; \
+  export DEBIAN_FRONTEND=noninteractive; \
+  if [ -n "${APT_MIRROR_HOST}" ]; then \
+  for f in /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list; do \
+  [ -f "$f" ] || continue; \
+  sed -i \
+  -e "s|http://archive.ubuntu.com/ubuntu|http://${APT_MIRROR_HOST}/ubuntu|g" \
+  -e "s|https://archive.ubuntu.com/ubuntu|http://${APT_MIRROR_HOST}/ubuntu|g" \
+  -e "s|http://security.ubuntu.com/ubuntu|http://${APT_MIRROR_HOST}/ubuntu|g" \
+  -e "s|https://security.ubuntu.com/ubuntu|http://${APT_MIRROR_HOST}/ubuntu|g" \
+  "$f" || true; \
+  done; \
+  fi; \
+  retry apt-get -o Acquire::Retries=5 update; \
+  # Some base images may have partially-installed packages; fix before adding build deps.
+  retry apt-get -y -f install; \
+  retry apt-get install -y --no-install-recommends --fix-missing --fix-broken \
+  --allow-change-held-packages --allow-downgrades \
+  build-essential \
+  ca-certificates \
+  cmake \
+  cmake-data \
+  cpp-x86-64-linux-gnu \
+  curl \
+  file \
+  git \
+  gfortran \
+  htop \
+  jq \
+  less \
+  libpam-modules \
+  libslurm40t64 \
+  libtcl8.6 \
+  lmod \
+  lua-bit32 \
+  lua-filesystem \
+  mpich \
+  libmpich-dev \
+  libmpich12 \
+  tcl8.6 \
+  numactl \
+  openssh-client \
+  procps \
+  python3-pip \
+  python3-venv \
+  rsync \
+  unzip \
+  vim \
+  wget \
+  xz-utils \
+  zip \
+  zstd; \
+  # Base images may ship OpenMPI as default; prefer MPICH for Slurm srun direct launch.
+  if command -v update-alternatives >/dev/null 2>&1 && [ -x /usr/bin/mpicc.mpich ]; then \
+    update-alternatives --set mpi /usr/bin/mpicc.mpich 2>/dev/null || true; \
+  fi; \
+  if apt-cache show apptainer >/dev/null 2>&1; then \
+  retry apt-get install -y --no-install-recommends --fix-missing apptainer; \
+  command -v singularity >/dev/null 2>&1 || ln -sf "$(command -v apptainer)" /usr/local/bin/singularity; \
+  elif apt-cache show singularity-container >/dev/null 2>&1; then \
+  retry apt-get install -y --no-install-recommends --fix-missing singularity-container; \
+  command -v apptainer >/dev/null 2>&1 || ln -sf "$(command -v singularity)" /usr/local/bin/apptainer; \
+  else \
+  echo "ERROR: neither apptainer nor singularity-container package found in apt repositories"; \
+  exit 1; \
+  fi; \
+  rm -rf /var/lib/apt/lists/*; \
+  grep -q "pam_mkhomedir.so" /etc/pam.d/common-session || \
+  echo "session required pam_mkhomedir.so skel=/etc/skel umask=0022" >> /etc/pam.d/common-session; \
+  printf '%s\n' \
+  '# Prepends Lmod MODULEPATH when Helm sharedSoftware PVC mounts /software (see docs 4.2.1).' \
+  'if [ -d /software/modulefiles ]; then' \
+  '  case ":${MODULEPATH:-}:" in' \
+  '    *":/software/modulefiles:"*) ;;' \
+  '    *) export MODULEPATH="/software/modulefiles${MODULEPATH:+:$MODULEPATH}" ;;' \
+  '  esac' \
+  'fi' \
+  > /etc/profile.d/slurm-shared-software-modulepath.sh \
+  && chmod 0644 /etc/profile.d/slurm-shared-software-modulepath.sh
 
 FROM ${BASE_WORKER_IMAGE} AS worker-hpc
 
 USER root
 
-ARG HTTP_PROXY
-ARG HTTPS_PROXY
-ARG NO_PROXY
-ARG http_proxy
-ARG https_proxy
-ARG no_proxy
 ARG APT_MIRROR_HOST
-ENV HTTP_PROXY=${HTTP_PROXY} HTTPS_PROXY=${HTTPS_PROXY} NO_PROXY=${NO_PROXY}
-ENV http_proxy=${http_proxy} https_proxy=${https_proxy} no_proxy=${no_proxy}
 
 # No vim on worker: edit on login or $HOME on shared storage; keeps slurmd image smaller.
 RUN set -eux; \
-    retry() { \
-      n=0; \
-      until [ "$n" -ge 5 ]; do \
-        "$@" && break; \
-        n=$((n+1)); \
-        echo "retry $n/5: $*"; \
-        sleep $((n*3)); \
-      done; \
-      [ "$n" -lt 5 ]; \
-    }; \
-    export DEBIAN_FRONTEND=noninteractive; \
-    if [ -n "${APT_MIRROR_HOST}" ]; then \
-      for f in /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list; do \
-        [ -f "$f" ] || continue; \
-        sed -i \
-          -e "s|http://archive.ubuntu.com/ubuntu|http://${APT_MIRROR_HOST}/ubuntu|g" \
-          -e "s|https://archive.ubuntu.com/ubuntu|http://${APT_MIRROR_HOST}/ubuntu|g" \
-          -e "s|http://security.ubuntu.com/ubuntu|http://${APT_MIRROR_HOST}/ubuntu|g" \
-          -e "s|https://security.ubuntu.com/ubuntu|http://${APT_MIRROR_HOST}/ubuntu|g" \
-          "$f" || true; \
-      done; \
-    fi; \
-    retry apt-get -o Acquire::Retries=5 update; \
-    retry apt-get install -y --no-install-recommends --fix-missing \
-      build-essential \
-      ca-certificates \
-      cmake \
-      curl \
-      file \
-      git \
-      gfortran \
-      htop \
-      jq \
-      less \
-      libpam-modules \
-      lmod \
-      numactl \
-      openssh-client \
-      procps \
-      python3-pip \
-      python3-venv \
-      rsync \
-      unzip \
-      wget \
-      xz-utils \
-      zip \
-      zstd; \
-    if apt-cache show apptainer >/dev/null 2>&1; then \
-      retry apt-get install -y --no-install-recommends --fix-missing apptainer; \
-      command -v singularity >/dev/null 2>&1 || ln -sf "$(command -v apptainer)" /usr/local/bin/singularity; \
-    elif apt-cache show singularity-container >/dev/null 2>&1; then \
-      retry apt-get install -y --no-install-recommends --fix-missing singularity-container; \
-      command -v apptainer >/dev/null 2>&1 || ln -sf "$(command -v singularity)" /usr/local/bin/apptainer; \
-    else \
-      echo "ERROR: neither apptainer nor singularity-container package found in apt repositories"; \
-      exit 1; \
-    fi; \
-    rm -rf /var/lib/apt/lists/*; \
-    grep -q "pam_mkhomedir.so" /etc/pam.d/common-session || \
-      echo "session required pam_mkhomedir.so skel=/etc/skel umask=0022" >> /etc/pam.d/common-session; \
-    printf '%s\n' \
-      '# Prepends Lmod MODULEPATH when Helm sharedSoftware PVC mounts /software (see docs 4.2.1).' \
-      'if [ -d /software/modulefiles ]; then' \
-      '  case ":${MODULEPATH:-}:" in' \
-      '    *":/software/modulefiles:"*) ;;' \
-      '    *) export MODULEPATH="/software/modulefiles${MODULEPATH:+:$MODULEPATH}" ;;' \
-      '  esac' \
-      'fi' \
-      > /etc/profile.d/slurm-shared-software-modulepath.sh \
-      && chmod 0644 /etc/profile.d/slurm-shared-software-modulepath.sh
+  retry() { \
+  n=0; \
+  until [ "$n" -ge 5 ]; do \
+  "$@" && break; \
+  n=$((n+1)); \
+  echo "retry $n/5: $*"; \
+  sleep $((n*3)); \
+  done; \
+  [ "$n" -lt 5 ]; \
+  }; \
+  export DEBIAN_FRONTEND=noninteractive; \
+  if [ -n "${APT_MIRROR_HOST}" ]; then \
+  for f in /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list; do \
+  [ -f "$f" ] || continue; \
+  sed -i \
+  -e "s|http://archive.ubuntu.com/ubuntu|http://${APT_MIRROR_HOST}/ubuntu|g" \
+  -e "s|https://archive.ubuntu.com/ubuntu|http://${APT_MIRROR_HOST}/ubuntu|g" \
+  -e "s|http://security.ubuntu.com/ubuntu|http://${APT_MIRROR_HOST}/ubuntu|g" \
+  -e "s|https://security.ubuntu.com/ubuntu|http://${APT_MIRROR_HOST}/ubuntu|g" \
+  "$f" || true; \
+  done; \
+  fi; \
+  retry apt-get -o Acquire::Retries=5 update; \
+  # Some base images may have partially-installed packages; fix before adding build deps.
+  retry apt-get -y -f install; \
+  retry apt-get install -y --no-install-recommends --fix-missing --fix-broken \
+  --allow-change-held-packages --allow-downgrades \
+  build-essential \
+  ca-certificates \
+  cmake \
+  cmake-data \
+  cpp-x86-64-linux-gnu \
+  curl \
+  file \
+  git \
+  gfortran \
+  htop \
+  jq \
+  less \
+  libpam-modules \
+  libslurm40t64 \
+  libtcl8.6 \
+  lmod \
+  lua-bit32 \
+  lua-filesystem \
+  mpich \
+  libmpich-dev \
+  libmpich12 \
+  tcl8.6 \
+  numactl \
+  openssh-client \
+  procps \
+  python3-pip \
+  python3-venv \
+  rsync \
+  unzip \
+  wget \
+  xz-utils \
+  zip \
+  zstd; \
+  # Base images may ship OpenMPI as default; prefer MPICH for Slurm srun direct launch.
+  if command -v update-alternatives >/dev/null 2>&1 && [ -x /usr/bin/mpicc.mpich ]; then \
+    update-alternatives --set mpi /usr/bin/mpicc.mpich 2>/dev/null || true; \
+  fi; \
+  if apt-cache show apptainer >/dev/null 2>&1; then \
+  retry apt-get install -y --no-install-recommends --fix-missing apptainer; \
+  command -v singularity >/dev/null 2>&1 || ln -sf "$(command -v apptainer)" /usr/local/bin/singularity; \
+  elif apt-cache show singularity-container >/dev/null 2>&1; then \
+  retry apt-get install -y --no-install-recommends --fix-missing singularity-container; \
+  command -v apptainer >/dev/null 2>&1 || ln -sf "$(command -v singularity)" /usr/local/bin/apptainer; \
+  else \
+  echo "ERROR: neither apptainer nor singularity-container package found in apt repositories"; \
+  exit 1; \
+  fi; \
+  rm -rf /var/lib/apt/lists/*; \
+  grep -q "pam_mkhomedir.so" /etc/pam.d/common-session || \
+  echo "session required pam_mkhomedir.so skel=/etc/skel umask=0022" >> /etc/pam.d/common-session; \
+  printf '%s\n' \
+  '# Prepends Lmod MODULEPATH when Helm sharedSoftware PVC mounts /software (see docs 4.2.1).' \
+  'if [ -d /software/modulefiles ]; then' \
+  '  case ":${MODULEPATH:-}:" in' \
+  '    *":/software/modulefiles:"*) ;;' \
+  '    *) export MODULEPATH="/software/modulefiles${MODULEPATH:+:$MODULEPATH}" ;;' \
+  '  esac' \
+  'fi' \
+  > /etc/profile.d/slurm-shared-software-modulepath.sh \
+  && chmod 0644 /etc/profile.d/slurm-shared-software-modulepath.sh
