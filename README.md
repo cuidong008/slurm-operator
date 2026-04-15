@@ -13,17 +13,17 @@ Run [Slurm] on [Kubernetes], by [SchedMD]. A [Slinky] project.
 
 ### `Dockerfile.hpc-tools` — MPICH 与常用 HPC 包
 
-| `--target`     | 用途           | 基础镜像角色   |
-| -------------- | -------------- | -------------- |
-| `login-hpc`    | 登录节点       | `login`        |
-| `worker-hpc`   | 计算节点 slurmd | `slurmd`       |
+| `--target`   | 用途            | 基础镜像角色 |
+| ------------ | --------------- | ------------ |
+| `login-hpc`  | 登录节点        | `login`      |
+| `worker-hpc` | 计算节点 slurmd | `slurmd`     |
 
 ```bash
 # 登录节点：默认 MPI 为 MPICH（update-alternatives）
 docker build --network=host \
   -f install/slurm-operator/docs/examples/Dockerfile.hpc-tools \
   --target login-hpc \
-  -t harbor.aix.com:8443/slinkyproject/slurmd:25.11-ubuntu24.04-hpc \
+  -t harbor.aix.com:8443/slinkyproject/login:25.11-ubuntu24.04-mpich-3 \
   --build-arg http_proxy="$http_proxy" \
   --build-arg https_proxy="$https_proxy" \
   --build-arg all_proxy="$all_proxy" \
@@ -36,7 +36,7 @@ docker build --network=host \
 docker build --network=host \
   -f install/slurm-operator/docs/examples/Dockerfile.hpc-tools \
   --target worker-hpc \
-  -t harbor.aix.com:8443/slinkyproject/slurmd:25.11-ubuntu24.04-openmpi-hpc \
+  -t harbor.aix.com:8443/slinkyproject/slurmd:25.11-ubuntu24.04-mpich-3 \
   --build-arg http_proxy="$http_proxy" \
   --build-arg https_proxy="$https_proxy" \
   --build-arg all_proxy="$all_proxy" \
@@ -105,6 +105,10 @@ docker build \
 <!-- mdformat-toc start --slug=github --no-anchors --maxlevel=6 --minlevel=1 -->
 
 - [Kubernetes Operator for Slurm Clusters](#kubernetes-operator-for-slurm-clusters)
+  - [Custom image builds (aixx)](#custom-image-builds-aixx)
+    - [`Dockerfile.hpc-tools` — MPICH 与常用 HPC 包](#dockerfilehpc-tools--mpich-与常用-hpc-包)
+    - [`Dockerfile.openmpi-slurm` — 源码 Open MPI 5.x（外部 PMIx，无 MPICH）](#dockerfileopenmpi-slurm--源码-open-mpi-5x外部-pmix无-mpich)
+    - [SCOW Slurm Adapter（`Dockerfile.login`）](#scow-slurm-adapterdockerfilelogin)
   - [Table of Contents](#table-of-contents)
   - [Overview](#overview)
     - [Slurm Cluster](#slurm-cluster)

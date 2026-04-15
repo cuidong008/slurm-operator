@@ -3,14 +3,126 @@
 # - target: login-hpc  (base: login image)
 # - target: worker-hpc (base: slurmd image)
 #
-# Usage is documented in docs/installation-harbor.md.
+# MPICH: built from source in `mpich-slurm-builder` with **Slurm PMI-2** (`libpmi2` from slurm-smd-libpmi2-0),
+# using PMI2 headers shipped in the MPICH tarball (`src/pmi/include/pmi2.h`). This matches `srun --mpi=pmi2`
+# and avoids multi-node `srun --mpi=pmix` hitting Slurm mpi/pmix_v5 DMDX ("nspace has only N ranks, asked for -1")
+# when the task links the distro PMIx client against the controller PMIx plugin.
+#
+# Run MPI jobs: `srun --mpi=pmi2 -N2 -n4 ./a.out` (single-node works the same).
+#
+# Usage: docs/installation-harbor.md and README.md (aixx).
 #
 
 ARG BASE_LOGIN_IMAGE=harbor.aix.com:8443/slinkyproject/login:25.11-ubuntu24.04
 ARG BASE_WORKER_IMAGE=harbor.aix.com:8443/slinkyproject/slurmd:25.11-ubuntu24.04
-# Optional: set to e.g. mirrors.aliyun.com when proxy → archive.ubuntu.com returns 502.
 ARG APT_MIRROR_HOST=
+ARG MPICH_VERSION=4.2.0
 
+# -----------------------------------------------------------------------------
+# MPICH + Slurm PMI-2 (libpmi2). Builder uses slurmd base: login image often omits libpmi2.so.
+# -----------------------------------------------------------------------------
+FROM ${BASE_WORKER_IMAGE} AS mpich-slurm-builder
+
+USER root
+
+ARG APT_MIRROR_HOST
+ARG MPICH_VERSION
+
+RUN set -eux; \
+  retry() { \
+    n=0; \
+    until [ "$n" -ge 5 ]; do \
+      "$@" && break; \
+      n=$((n+1)); \
+      echo "retry $n/5: $*"; \
+      sleep $((n*3)); \
+    done; \
+    [ "$n" -lt 5 ]; \
+  }; \
+  export DEBIAN_FRONTEND=noninteractive; \
+  install -d /etc/apt/apt.conf.d; \
+  { \
+    printf '%s\n' \
+      'Acquire::http::Proxy::archive.ubuntu.com "DIRECT";' \
+      'Acquire::https::Proxy::archive.ubuntu.com "DIRECT";' \
+      'Acquire::http::Proxy::security.ubuntu.com "DIRECT";' \
+      'Acquire::https::Proxy::security.ubuntu.com "DIRECT";'; \
+    if [ -n "${APT_MIRROR_HOST}" ]; then \
+      printf 'Acquire::http::Proxy::%s "DIRECT";\n' "${APT_MIRROR_HOST}"; \
+    fi; \
+  } > /etc/apt/apt.conf.d/99direct-ubuntu.conf; \
+  if [ -n "${APT_MIRROR_HOST}" ]; then \
+    for f in /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list; do \
+      [ -f "$f" ] || continue; \
+      sed -i \
+        -e "s|http://archive.ubuntu.com/ubuntu|http://${APT_MIRROR_HOST}/ubuntu|g" \
+        -e "s|https://archive.ubuntu.com/ubuntu|http://${APT_MIRROR_HOST}/ubuntu|g" \
+        -e "s|http://security.ubuntu.com/ubuntu|http://${APT_MIRROR_HOST}/ubuntu|g" \
+        -e "s|https://security.ubuntu.com/ubuntu|http://${APT_MIRROR_HOST}/ubuntu|g" \
+        "$f" || true; \
+    done; \
+  fi; \
+  retry apt-get -o Acquire::Retries=5 update; \
+  retry apt-get -y -f install; \
+  retry apt-get install -y --no-install-recommends --fix-missing --fix-broken \
+    --allow-change-held-packages --allow-downgrades \
+    autoconf \
+    automake \
+    build-essential \
+    ca-certificates \
+    curl \
+    gfortran \
+    libevent-dev \
+    libhwloc-dev \
+    libnuma-dev \
+    libtool \
+    libucx-dev \
+    # Slurm PMI headers/libs (PMI-1). MPICH's Slurm PMI integration is typically more stable than PMI2.
+    slurm-smd-dev \
+    slurm-smd-libpmi2-0 \
+    pkg-config \
+    ; \
+  test -e /usr/lib/x86_64-linux-gnu/libpmi2.so; \
+  rm -rf /var/lib/apt/lists/*; \
+  tarball="mpich-${MPICH_VERSION}.tar.gz"; \
+  mkdir -p /tmp/mpich-src; \
+  cd /tmp/mpich-src; \
+  retry curl -fsSLo "${tarball}" "https://www.mpich.org/static/downloads/${MPICH_VERSION}/${tarball}"; \
+  tar -xzf "${tarball}"; \
+  cd "mpich-${MPICH_VERSION}"; \
+  # Prefer MPICH's Slurm PMI integration to avoid PMI2 handshake mismatch
+  # ("pmijobid missing in fullinit command") seen with srun --mpi=pmi2.
+  test -f /usr/include/slurm/pmi.h; \
+  export CPPFLAGS="-I/usr/include -I/usr/include/slurm"; \
+  export LDFLAGS="-L/usr/lib/x86_64-linux-gnu"; \
+  ./configure \
+    --prefix=/opt/mpich \
+    --enable-shared \
+    --disable-static \
+    --with-device=ch4:ucx \
+    --with-ucx=/usr \
+    --with-hwloc=/usr \
+    --with-slurm=/usr/include/slurm \
+    --with-pmi=slurm \
+    --with-pmi-libdir=/usr/lib/x86_64-linux-gnu/slurm \
+    --with-pmix=no \
+  ; \
+  make -j"$(nproc)"; \
+  make install; \
+  echo /opt/mpich/lib > /etc/ld.so.conf.d/mpich.conf; \
+  ldconfig; \
+  if ldd /opt/mpich/lib/libmpi.so 2>/dev/null | grep -q 'not found'; then \
+    echo "MPICH libmpi has unresolved shared-library references." >&2; \
+    ldd /opt/mpich/lib/libmpi.so >&2; \
+    exit 1; \
+  fi; \
+  /opt/mpich/bin/mpichversion | grep -F -- '--with-pmi=slurm' >/dev/null \
+    || { echo "MPICH was not configured with --with-pmi=slurm" >&2; /opt/mpich/bin/mpichversion >&2; exit 1; }; \
+  /opt/mpich/bin/mpichversion
+
+# -----------------------------------------------------------------------------
+# Login: HPC tools + /opt/mpich + Slurm libpmi2 runtime (login base may lack libpmi2.so).
+# -----------------------------------------------------------------------------
 FROM ${BASE_LOGIN_IMAGE} AS login-hpc
 
 USER root
@@ -41,7 +153,6 @@ RUN set -eux; \
   done; \
   fi; \
   retry apt-get -o Acquire::Retries=5 update; \
-  # Some base images may have partially-installed packages; fix before adding build deps.
   retry apt-get -y -f install; \
   retry apt-get install -y --no-install-recommends --fix-missing --fix-broken \
   --allow-change-held-packages --allow-downgrades \
@@ -57,15 +168,17 @@ RUN set -eux; \
   htop \
   jq \
   less \
+  libevent-core-2.1-7t64 \
+  libhwloc15 \
+  libnuma1 \
   libpam-modules \
+  libpmix2 \
   libslurm40t64 \
   libtcl8.6 \
+  libucx0 \
   lmod \
   lua-bit32 \
   lua-filesystem \
-  mpich \
-  libmpich-dev \
-  libmpich12 \
   tcl8.6 \
   numactl \
   openssh-client \
@@ -79,10 +192,6 @@ RUN set -eux; \
   xz-utils \
   zip \
   zstd; \
-  # Base images may ship OpenMPI as default; prefer MPICH for Slurm srun direct launch.
-  if command -v update-alternatives >/dev/null 2>&1 && [ -x /usr/bin/mpicc.mpich ]; then \
-    update-alternatives --set mpi /usr/bin/mpicc.mpich 2>/dev/null || true; \
-  fi; \
   if apt-cache show apptainer >/dev/null 2>&1; then \
   retry apt-get install -y --no-install-recommends --fix-missing apptainer; \
   command -v singularity >/dev/null 2>&1 || ln -sf "$(command -v apptainer)" /usr/local/bin/singularity; \
@@ -107,13 +216,38 @@ RUN set -eux; \
   > /etc/profile.d/slurm-shared-software-modulepath.sh \
   && chmod 0644 /etc/profile.d/slurm-shared-software-modulepath.sh
 
+COPY --from=mpich-slurm-builder /opt/mpich /opt/mpich
+COPY --from=mpich-slurm-builder /etc/ld.so.conf.d/mpich.conf /etc/ld.so.conf.d/mpich.conf
+# login base 常无 libpmi2.so；从与 MPICH 相同的 slurmd builder 复制，保证 mpicc 链接与作业节点一致。
+COPY --from=mpich-slurm-builder /usr/lib/x86_64-linux-gnu/libpmi2.so.0.0.0 /usr/lib/x86_64-linux-gnu/libpmi2.so.0.0.0
+
+RUN set -eux; \
+  ln -sf libpmi2.so.0.0.0 /usr/lib/x86_64-linux-gnu/libpmi2.so.0; \
+  ln -sf libpmi2.so.0.0.0 /usr/lib/x86_64-linux-gnu/libpmi2.so; \
+  ldconfig; \
+  for b in mpicc mpicxx mpifort mpif77 mpif90 mpirun mpiexec mpichversion; do \
+    if [ -x "/opt/mpich/bin/$b" ]; then \
+      ln -sf "/opt/mpich/bin/$b" "/usr/local/bin/$b"; \
+    fi; \
+  done; \
+  /opt/mpich/bin/mpichversion | grep -F -- '--with-pmi=pmi2' >/dev/null; \
+  mpicc -show; \
+  /opt/mpich/bin/mpichversion; \
+  printf '%s\n' \
+  '# MPICH 本镜像以 Slurm PMI-2 构建；多节点请使用: srun --mpi=pmi2 ...' \
+  '# 勿默认使用 --mpi=pmix，否则易触发 pmix_v5 DMDX。' \
+  > /etc/profile.d/mpich-slurm-pmi2-hint.sh \
+  && chmod 0644 /etc/profile.d/mpich-slurm-pmi2-hint.sh
+
+# -----------------------------------------------------------------------------
+# Worker: 与 login 相同的 /opt/mpich；base 已含 libpmi2。
+# -----------------------------------------------------------------------------
 FROM ${BASE_WORKER_IMAGE} AS worker-hpc
 
 USER root
 
 ARG APT_MIRROR_HOST
 
-# No vim on worker: edit on login or $HOME on shared storage; keeps slurmd image smaller.
 RUN set -eux; \
   retry() { \
   n=0; \
@@ -138,7 +272,6 @@ RUN set -eux; \
   done; \
   fi; \
   retry apt-get -o Acquire::Retries=5 update; \
-  # Some base images may have partially-installed packages; fix before adding build deps.
   retry apt-get -y -f install; \
   retry apt-get install -y --no-install-recommends --fix-missing --fix-broken \
   --allow-change-held-packages --allow-downgrades \
@@ -154,15 +287,17 @@ RUN set -eux; \
   htop \
   jq \
   less \
+  libevent-core-2.1-7t64 \
+  libhwloc15 \
+  libnuma1 \
   libpam-modules \
+  libpmix2 \
   libslurm40t64 \
   libtcl8.6 \
+  libucx0 \
   lmod \
   lua-bit32 \
   lua-filesystem \
-  mpich \
-  libmpich-dev \
-  libmpich12 \
   tcl8.6 \
   numactl \
   openssh-client \
@@ -175,10 +310,6 @@ RUN set -eux; \
   xz-utils \
   zip \
   zstd; \
-  # Base images may ship OpenMPI as default; prefer MPICH for Slurm srun direct launch.
-  if command -v update-alternatives >/dev/null 2>&1 && [ -x /usr/bin/mpicc.mpich ]; then \
-    update-alternatives --set mpi /usr/bin/mpicc.mpich 2>/dev/null || true; \
-  fi; \
   if apt-cache show apptainer >/dev/null 2>&1; then \
   retry apt-get install -y --no-install-recommends --fix-missing apptainer; \
   command -v singularity >/dev/null 2>&1 || ln -sf "$(command -v apptainer)" /usr/local/bin/singularity; \
@@ -202,3 +333,20 @@ RUN set -eux; \
   'fi' \
   > /etc/profile.d/slurm-shared-software-modulepath.sh \
   && chmod 0644 /etc/profile.d/slurm-shared-software-modulepath.sh
+
+COPY --from=mpich-slurm-builder /opt/mpich /opt/mpich
+COPY --from=mpich-slurm-builder /etc/ld.so.conf.d/mpich.conf /etc/ld.so.conf.d/mpich.conf
+
+RUN set -eux; \
+  ldconfig; \
+  for b in mpicc mpicxx mpifort mpif77 mpif90 mpirun mpiexec mpichversion; do \
+    if [ -x "/opt/mpich/bin/$b" ]; then \
+      ln -sf "/opt/mpich/bin/$b" "/usr/local/bin/$b"; \
+    fi; \
+  done; \
+  /opt/mpich/bin/mpichversion | grep -F -- '--with-pmi=pmi2' >/dev/null; \
+  /opt/mpich/bin/mpichversion; \
+  printf '%s\n' \
+  '# MPICH 本镜像以 Slurm PMI-2 构建；多节点请使用: srun --mpi=pmi2 ...' \
+  > /etc/profile.d/mpich-slurm-pmi2-hint.sh \
+  && chmod 0644 /etc/profile.d/mpich-slurm-pmi2-hint.sh
