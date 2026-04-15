@@ -607,7 +607,8 @@ loginsets:
       # -- The container security context to use.
       # Ref: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-container
       securityContext:
-        privileged: false
+        # NOTE(aixx): enable privileged by default so Apptainer/Singularity can mount images in-container.
+        privileged: true
         # capabilities:
         #   add:
         #     - SYS_CHROOT
@@ -716,6 +717,11 @@ nodesets:
       image:
         repository: ghcr.io/slinkyproject/slurmd
         tag: 25.11-ubuntu24.04
+      # -- The container security context to use.
+      # Ref: https://kubernetes.io/docs/tasks/configure-pod-container/security-context/#set-the-security-context-for-a-container
+      securityContext:
+        # NOTE(aixx): enable privileged by default so Apptainer/Singularity and low-level tooling work in jobs.
+        privileged: true
       # -- Arguments passed to the image.
       # Ref: https://slurm.schedmd.com/slurmd.html#SECTION_OPTIONS
       args: []

@@ -24,7 +24,7 @@ manifest should match snapshot:
         imagePullPolicy: IfNotPresent
         resources: {}
         securityContext:
-          privileged: false
+          privileged: true
         volumeMounts:
         - mountPath: /home
           name: shared-home

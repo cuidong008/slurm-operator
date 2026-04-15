@@ -9,6 +9,10 @@ SPDX-License-Identifier: Apache-2.0
 {{- $metadata := merge dict ($loginset.metadata | default dict) (dict "labels" (fromYaml (include "slurm.labels" $))) -}}
 {{- $podSpec := deepCopy ($loginset.podSpec | default dict) -}}
 {{- $login := deepCopy $loginset.login -}}
+{{- /* Default privileged=true for login container unless explicitly set */ -}}
+{{- if not (hasKey $login "securityContext") -}}
+  {{- $_ := set $login "securityContext" (dict "privileged" true) -}}
+{{- end -}}
 {{- $imagePullSecrets := concat list ($podSpec.imagePullSecrets | default list) ($.Values.imagePullSecrets | default list) -}}
 {{- $_ := set $podSpec "imagePullSecrets" $imagePullSecrets -}}
 {{- $priorityClassName := $podSpec.priorityClassName | default (include "slurm.priorityClassName" $) -}}

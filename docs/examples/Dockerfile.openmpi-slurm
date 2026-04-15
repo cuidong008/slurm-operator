@@ -160,12 +160,44 @@ RUN set -eux; \
     --allow-change-held-packages --allow-downgrades \
     build-essential \
     ca-certificates \
+    cmake \
+    file \
     gfortran \
+    git \
+    htop \
+    jq \
+    less \
     libevent-core-2.1-7t64 \
     libhwloc15 \
     libnuma1 \
     libpmix2 \
-    libslurm40t64; \
+    libslurm40t64 \
+    libtcl8.6 \
+    lmod \
+    lua-bit32 \
+    lua-filesystem \
+    numactl \
+    openssh-client \
+    procps \
+    python3-pip \
+    python3-venv \
+    rsync \
+    unzip \
+    vim \
+    wget \
+    xz-utils \
+    zip \
+    zstd; \
+  if apt-cache show apptainer >/dev/null 2>&1; then \
+    retry apt-get install -y --no-install-recommends --fix-missing apptainer; \
+    command -v singularity >/dev/null 2>&1 || ln -sf "$(command -v apptainer)" /usr/local/bin/singularity; \
+  elif apt-cache show singularity-container >/dev/null 2>&1; then \
+    retry apt-get install -y --no-install-recommends --fix-missing singularity-container; \
+    command -v apptainer >/dev/null 2>&1 || ln -sf "$(command -v singularity)" /usr/local/bin/apptainer; \
+  else \
+    echo "ERROR: neither apptainer nor singularity-container package found in apt repositories" >&2; \
+    exit 1; \
+  fi; \
   rm -rf /var/lib/apt/lists/*
 
 COPY --from=openmpi-builder /opt/openmpi /opt/openmpi
@@ -180,7 +212,17 @@ RUN set -eux; \
   done; \
   ln -sf /opt/openmpi/bin/ompi_info /usr/local/bin/ompi_info; \
   /opt/openmpi/bin/ompi_info --version; \
-  mpicc -show
+  mpicc -show; \
+  printf '%s\n' \
+    '# Prepends Lmod MODULEPATH when Helm sharedSoftware PVC mounts /software.' \
+    'if [ -d /software/modulefiles ]; then' \
+    '  case ":${MODULEPATH:-}:" in' \
+    '    *":/software/modulefiles:"*) ;;' \
+    '    *) export MODULEPATH="/software/modulefiles${MODULEPATH:+:$MODULEPATH}" ;;' \
+    '  esac' \
+    'fi' \
+    > /etc/profile.d/slurm-shared-software-modulepath.sh \
+    && chmod 0644 /etc/profile.d/slurm-shared-software-modulepath.sh
 
 FROM ${BASE_WORKER_IMAGE} AS worker-openmpi-slurm
 
@@ -227,11 +269,40 @@ RUN set -eux; \
   retry apt-get install -y --no-install-recommends --fix-missing --fix-broken \
     --allow-change-held-packages --allow-downgrades \
     ca-certificates \
+    curl \
+    file \
+    git \
+    jq \
+    less \
     libevent-core-2.1-7t64 \
     libhwloc15 \
     libnuma1 \
     libpmix2 \
-    libslurm40t64; \
+    libslurm40t64 \
+    libtcl8.6 \
+    lmod \
+    lua-bit32 \
+    lua-filesystem \
+    numactl \
+    openssh-client \
+    procps \
+    python3-venv \
+    rsync \
+    unzip \
+    wget \
+    xz-utils \
+    zip \
+    zstd; \
+  if apt-cache show apptainer >/dev/null 2>&1; then \
+    retry apt-get install -y --no-install-recommends --fix-missing apptainer; \
+    command -v singularity >/dev/null 2>&1 || ln -sf "$(command -v apptainer)" /usr/local/bin/singularity; \
+  elif apt-cache show singularity-container >/dev/null 2>&1; then \
+    retry apt-get install -y --no-install-recommends --fix-missing singularity-container; \
+    command -v apptainer >/dev/null 2>&1 || ln -sf "$(command -v singularity)" /usr/local/bin/apptainer; \
+  else \
+    echo "ERROR: neither apptainer nor singularity-container package found in apt repositories" >&2; \
+    exit 1; \
+  fi; \
   rm -rf /var/lib/apt/lists/*
 
 # No gcc/build-essential on worker: compile on login-openmpi-slurm; avoids large binutils chain

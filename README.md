@@ -57,7 +57,7 @@ docker build --network=host \
 docker build --network=host \
   -f install/slurm-operator/docs/examples/Dockerfile.openmpi-slurm \
   --target worker-openmpi-slurm \
-  -t harbor.aix.com:8443/slinkyproject/slurmd:25.11-ubuntu24.04-openmpi \
+  -t harbor.aix.com:8443/slinkyproject/slurmd:25.11-ubuntu24.04-openmpi-4 \
   --build-arg http_proxy="$http_proxy" \
   --build-arg https_proxy="$https_proxy" \
   --build-arg all_proxy="$all_proxy" \
@@ -70,7 +70,7 @@ docker build --network=host \
 docker build --network=host \
   -f install/slurm-operator/docs/examples/Dockerfile.openmpi-slurm \
   --target login-openmpi-slurm \
-  -t harbor.aix.com:8443/slinkyproject/login:25.11-ubuntu24.04-openmpi \
+  -t harbor.aix.com:8443/slinkyproject/login:25.11-ubuntu24.04-openmpi-4 \
   --build-arg http_proxy="$http_proxy" \
   --build-arg https_proxy="$https_proxy" \
   --build-arg all_proxy="$all_proxy" \
