@@ -275,6 +275,7 @@ RUN set -eux; \
     jq \
     less \
     libevent-core-2.1-7t64 \
+    libgomp1 \
     libhwloc15 \
     libnuma1 \
     libpmix2 \
